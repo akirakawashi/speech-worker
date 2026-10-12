@@ -16,12 +16,10 @@ GigaAM не подключён; зависимостей CUDA, PyTorch и лок
 
 ## Локальное окружение
 
-Нужны Python 3.12+, ffmpeg и ffprobe.
+Нужны UV 0.11.18+, Python 3.12, ffmpeg и ffprobe.
 
 ```bash
-uv venv --python 3.12 .venv
-uv pip install --python .venv/bin/python -r requirements-dev.lock
-uv pip install --python .venv/bin/python --no-deps -e .
+uv sync --locked
 cp .env.example .env
 ```
 
@@ -30,9 +28,9 @@ NCC. Полный цикл также требует существующего 
 Команда с ограничением `--stages` требует настройки только выбранных этапов.
 
 ```bash
-.venv/bin/speech-worker --lanes daily,backfill
-.venv/bin/speech-worker --lanes daily --stages ingest,transcribe
-.venv/bin/speech-worker --lanes daily --once
+uv run --locked speech-worker --lanes daily,backfill
+uv run --locked speech-worker --lanes daily --stages ingest,transcribe
+uv run --locked speech-worker --lanes daily --once
 ```
 
 Один процесс выполняет одно задание за раз. `--once` обрабатывает не больше
@@ -79,11 +77,11 @@ read-only mount каталога записей; исходники и запи�
 ## Проверки и документация
 
 ```bash
-.venv/bin/ruff check .
-.venv/bin/ruff format --check .
-.venv/bin/python -m mypy src
+uv run --locked ruff check .
+uv run --locked ruff format --check .
+uv run --locked mypy src
 SPEECH_POSTGRES_TEST_URL=<URL_отдельной_тестовой_базы> \
-  SPEECH_REQUIRE_LIVE_PROOFS=1 .venv/bin/python -m pytest -q
+  SPEECH_REQUIRE_LIVE_PROOFS=1 uv run --locked pytest -q
 ```
 
 - [Правила работы](AGENTS.md).

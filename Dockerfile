@@ -1,9 +1,15 @@
 # syntax=docker/dockerfile:1
+FROM ghcr.io/astral-sh/uv:0.11.18 AS uv
+
 FROM python:3.12-slim
+COPY --from=uv /uv /usr/local/bin/uv
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
-    SPEECH_WORKER_TEMP_DIR=/var/tmp/speech-worker
+    UV_PYTHON_DOWNLOADS=never \
+    UV_LINK_MODE=copy \
+    SPEECH_WORKER_TEMP_DIR=/var/tmp/speech-worker \
+    PATH="/app/.venv/bin:$PATH"
 
 WORKDIR /app
 
@@ -16,14 +22,16 @@ RUN apt-get update \
     && mkdir -p /var/tmp/speech-worker \
     && chown 10001:10001 /var/tmp/speech-worker
 
-COPY requirements.lock ./
-RUN pip install --no-cache-dir -r requirements.lock
+COPY pyproject.toml uv.lock ./
+RUN --mount=type=cache,target=/root/.cache/uv \
+    uv sync --locked --no-dev --no-install-project
 
-COPY pyproject.toml README.md ./
+COPY README.md ./
 COPY src ./src
 
-RUN pip install --no-cache-dir --no-deps . \
-    && python -m pip check \
+RUN --mount=type=cache,target=/root/.cache/uv \
+    uv sync --locked --no-dev --no-editable
+RUN uv pip check \
     && speech-worker --help \
     && speech-ingest --help \
     && ffmpeg -version > /dev/null \

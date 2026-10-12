@@ -1,11 +1,8 @@
-[build-system]
-requires = ["setuptools>=68"]
-build-backend = "setuptools.build_meta"
-
 [project]
 name = "speech-worker"
 version = "0.1.0"
 description = "Independent worker for call ingestion, Whisper transcription and operator evaluation."
+readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
   "pydantic>=2.13.5,<3",
@@ -16,7 +13,7 @@ dependencies = [
   "tzdata>=2026.1",
 ]
 
-[project.optional-dependencies]
+[dependency-groups]
 dev = [
   "mypy>=2.3.0,<3",
   "pytest>=9.1.1,<10",
@@ -40,12 +37,16 @@ speech-seed-classifier = "src.presentation.cli.seed_classifier:main"
 speech-seed-call-reasons = "src.presentation.cli.seed_call_reasons:main"
 speech-compare-models = "src.presentation.cli.compare_models:main"
 
-[tool.setuptools.packages.find]
-include = ["src*"]
-exclude = ["tests*"]
+[build-system]
+requires = ["uv_build>=0.11.18,<0.12.0"]
+build-backend = "uv_build"
 
-[tool.setuptools.package-data]
-"src.infrastructure.data" = ["*.json"]
+[tool.uv]
+required-version = ">=0.11.18"
+
+[tool.uv.build-backend]
+module-name = "src"
+module-root = ""
 
 [tool.pytest.ini_options]
 minversion = "9.0"
