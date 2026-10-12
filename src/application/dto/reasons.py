@@ -20,7 +20,7 @@ class FillReport(BaseModel):
     filled: int = 0
     #: Модель трижды не дала кода из справочника — звонок останется в следующий раз.
     unanswered: int = 0
-    #: Dify недоступен после повторов.
+    #: LLM недоступен после повторов.
     failed: int = 0
     applied: bool = False
     seconds: float = 0.0
@@ -31,7 +31,7 @@ class FillReport(BaseModel):
             return f"звонков без причины: {self.candidates}; взяла бы все"
         return (
             f"звонков без причины: {self.candidates}; записано: {self.filled}; "
-            f"без ответа модели: {self.unanswered}; сбой Dify: {self.failed}; "
+            f"без ответа модели: {self.unanswered}; сбой LLM: {self.failed}; "
             f"{self.seconds:.0f} с"
         )
 

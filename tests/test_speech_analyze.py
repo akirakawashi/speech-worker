@@ -623,7 +623,7 @@ async def test_without_a_reference_the_call_is_still_analysed() -> None:
 
 
 async def test_a_reference_too_long_for_the_workflow_is_not_sent() -> None:
-    """Справочник, правленный в обход загрузки: длиннее предела Dify отказал бы всему разбору."""
+    """Справочник, правленный в обход загрузки: длиннее предела LLM отказал бы всему разбору."""
     huge = [{"code": f"K{n:02d}", "label": "Подпись", "hint": "Правило. " * 100} for n in range(30)]
     session = _Session(_call(), _segments("текст"), _nodes(), reasons=huge)
     workflow = _Workflow(_ok(call_reason="Текст.", call_reason_code="K05"))

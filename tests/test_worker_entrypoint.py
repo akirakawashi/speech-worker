@@ -71,8 +71,9 @@ def runtime(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> SimpleNamespace:
     settings = Settings(
         _env_file=None,
         speech_worker_temp_dir=tmp_path / "scratch",
-        speech_dify_base_url="http://analysis.invalid/v1",
-        speech_dify_app_key="synthetic-key",
+        speech_analysis_llm_base_url="http://analysis.invalid/v1",
+        speech_backend_base_url="http://backend.invalid",
+        speech_worker_api_token="synthetic-key",
     )
     return SimpleNamespace(engine=engine, worker=worker, factory=worker_factory, settings=settings)
 
@@ -92,7 +93,7 @@ async def test_analysis_only_needs_no_recording_source_storage_or_whisper(runtim
 
 async def test_startup_failure_disposes_pool_before_processing(runtime) -> None:
     """Ненастроенный выбранный этап останавливает запуск, сохраняя закрытие пула."""
-    settings = runtime.settings.model_copy(update={"speech_dify_app_key": ""})
+    settings = runtime.settings.model_copy(update={"speech_worker_api_token": ""})
     with pytest.raises(RuntimeError):
         await module._run_worker(WorkerOptions(stages=(JobKind.ANALYZE,)), settings)
     runtime.factory.assert_not_called()

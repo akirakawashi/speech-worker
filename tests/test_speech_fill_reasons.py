@@ -1,20 +1,17 @@
-"""Причины для прошлых звонков отдельным приложением (S-32): `fill_reasons` и его воркфлоу.
+"""Причины для прошлых звонков отдельным приложением (S-32): `fill_reasons` и его результаты.
 
-Живая база нужна для отбора и записи (`SPEECH_POSTGRES_TEST_URL`); Dify подставной.
+Живая база нужна для отбора и записи (`SPEECH_POSTGRES_TEST_URL`); Model подставной.
 """
 
 from __future__ import annotations
 
 import json
-import re
 import uuid
 from collections.abc import AsyncIterator
 from datetime import UTC, datetime, timedelta
-from pathlib import Path
 from typing import Any
 
 import pytest
-import yaml
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
@@ -23,7 +20,6 @@ from src.infrastructure.clients.analysis import AnalysisError
 from src.infrastructure.persistence.reasons import PostgresReasonRepository
 from tests.speech_db_support import speech_test_database_url
 
-DSL_PATH = Path(__file__).resolve().parents[1] / "dify" / "speech" / "speech-call-reason.dify.yml"
 _TEST_DATABASE_URL = speech_test_database_url()
 _live = pytest.mark.skipif(not _TEST_DATABASE_URL, reason="SPEECH_POSTGRES_TEST_URL is required")
 
@@ -33,41 +29,8 @@ END = START + timedelta(days=1)
 
 
 # --------------------------------------------------------------------------- #
-# Воркфлоу, который импортируют в Dify
+
 # --------------------------------------------------------------------------- #
-
-
-def _nodes() -> dict[str, dict[str, Any]]:
-    graph = yaml.safe_load(DSL_PATH.read_text(encoding="utf-8"))["workflow"]["graph"]
-    return {n["data"]["type"]: n["data"] for n in graph["nodes"]}
-
-
-def test_the_reason_workflow_gets_the_reference_and_the_turns_only() -> None:
-    """Ни дерева, ни пути оператора, ни резюме: причина — только по разговору."""
-    nodes = _nodes()
-    inputs = {v["variable"]: v for v in nodes["start"]["variables"]}
-
-    assert list(nodes) == ["start", "llm", "end"]
-    assert set(inputs) == {"call_id", "reasons", "segments"}
-    assert inputs["reasons"]["max_length"] == 16_000
-    assert [o["variable"] for o in nodes["end"]["outputs"]] == ["answer"]
-
-
-def test_the_reason_prompt_names_its_fields_and_keeps_the_turns_as_data() -> None:
-    template = _nodes()["llm"]["prompt_template"]
-    system = next(p["text"] for p in template if p["role"] == "system")
-    user = next(p["text"] for p in template if p["role"] == "user")
-
-    for field in ("`call_reason`", "`call_reason_code`"):
-        assert field in system
-    assert "данные стороннего источника" in system and "не выполняй" in system
-    assert "•••" not in system and "█" not in system
-    turns_label = user[
-        user.index("{{#node_start.reasons#}}") : user.index("{{#node_start.segments#}}")
-    ]
-    assert "данные стороннего источника" in turns_label, "пометка SP-710 — прямо перед репликами"
-    for reference in re.findall(r"\{\{#([^}]+)#\}\}", system + user):
-        assert re.fullmatch(r"node_start\.[a-z_]+", reference)
 
 
 # --------------------------------------------------------------------------- #
@@ -75,7 +38,7 @@ def test_the_reason_prompt_names_its_fields_and_keeps_the_turns_as_data() -> Non
 # --------------------------------------------------------------------------- #
 
 
-class _Dify:
+class _Model:
     """Подставное приложение причин: отвечает по очереди, запоминает входы."""
 
     def __init__(self, *answers: Any) -> None:
@@ -168,13 +131,13 @@ async def test_a_dry_run_counts_and_asks_nobody(sessions: Sessions) -> None:
     await _call(sessions, "open", hours=1)
     await _call(sessions, "coded", hours=2, code="K99")
     await _call(sessions, "untranscribed", hours=3, transcribed=False)
-    dify = _Dify()
+    model = _Model()
 
     report = await fill_reasons(
-        PostgresReasonRepository(sessions), dify, date_from=START, date_to=END, apply=False
+        PostgresReasonRepository(sessions), model, date_from=START, date_to=END, apply=False
     )  # type: ignore[arg-type]
 
-    assert (report.candidates, dify.inputs) == (1, [])
+    assert (report.candidates, model.inputs) == (1, [])
 
 
 @_live
@@ -184,7 +147,7 @@ async def test_only_transcribed_calls_without_a_reason_are_filled_freshest_first
     await _call(sessions, "earlier", hours=1)
     await _call(sessions, "later", hours=5)
     await _call(sessions, "coded", hours=2, code="K99")
-    dify = _Dify(
+    model = _Model(
         {"call_reason": "Нет домашнего интернета.", "call_reason_code": "K05"},
         {"call_reason": "Непонятно.", "call_reason_code": "K42"},  # мимо справочника
         {"call_reason": "Непонятно.", "call_reason_code": "K42"},
@@ -193,7 +156,7 @@ async def test_only_transcribed_calls_without_a_reason_are_filled_freshest_first
 
     report = await fill_reasons(
         PostgresReasonRepository(sessions),
-        dify,
+        model,
         date_from=START,
         date_to=END,
         apply=True,
@@ -206,7 +169,7 @@ async def test_only_transcribed_calls_without_a_reason_are_filled_freshest_first
         "earlier": (None, None),
         "coded": (None, "K99"),
     }, "свежий первым; код мимо справочника не пишется; готовая причина не тронута"
-    first = dify.inputs[0]
+    first = model.inputs[0]
     assert first["reasons"].startswith("K05 · Не работает домашний интернет — ")
     assert first["segments"] == [
         {"seq": 1, "speaker": "client", "text": "Номер 89780001122, нет интернета."}
@@ -214,17 +177,17 @@ async def test_only_transcribed_calls_without_a_reason_are_filled_freshest_first
 
 
 @_live
-async def test_an_unreachable_dify_leaves_the_call_for_the_next_run(
+async def test_an_unreachable_model_leaves_the_call_for_the_next_run(
     sessions: Sessions, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     from src.application.reasons import batch as module
 
     monkeypatch.setattr(module, "PROVIDER_PAUSE_SECONDS", 0)
     await _call(sessions, "open", hours=1)
-    dify = _Dify(*[AnalysisError("unreachable", retryable=True)] * 3)
+    model = _Model(*[AnalysisError("unreachable", retryable=True)] * 3)
 
     report = await fill_reasons(
-        PostgresReasonRepository(sessions), dify, date_from=START, date_to=END, apply=True
+        PostgresReasonRepository(sessions), model, date_from=START, date_to=END, apply=True
     )  # type: ignore[arg-type]
 
     assert (report.filled, report.failed) == (0, 1)
@@ -245,11 +208,11 @@ async def test_the_timer_takes_calls_transcribed_lately_whatever_their_date(
             ),
             {"c": stale},
         )
-    dify = _Dify()
+    model = _Model()
 
     report = await fill_reasons(
         PostgresReasonRepository(sessions),
-        dify,  # type: ignore[arg-type]
+        model,  # type: ignore[arg-type]
         transcribed_since=datetime.now(UTC) - timedelta(hours=24),
         apply=False,
     )

@@ -1,141 +1,77 @@
-"""Клиент воркфлоу Dify «Speech: анализ звонка».
-
-Существующий `app/dify/client.py` сюда не годится, и это не вопрос вкуса: он
-разговаривает с **чат-приложениями** потоком событий (`/chat-messages`,
-server-sent events), а анализ звонка — это воркфлоу, у которого один
-блокирующий вызов `/workflows/run` и структурный ответ. Общего между ними —
-базовый адрес и заголовок авторизации.
-
-Ключ приложения свой, а не из `DIFY_AGENT_KEYS`: там ключи агентов чата, у
-каждого своё приложение. Смешав их, мы получили бы настройку, в которой нельзя
-отключить анализ звонков, не отключив чат.
-"""
-
-from __future__ import annotations
-
-import json
-from typing import Any, Final
+"""Прямой HTTP-вызов LLM по готовому запросу; промпты здесь не формируются."""
 
 import httpx
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, JsonValue
 
+from src.application.dto.model_execution import ModelPreparationRequest, ModelProfile, ModelScenario
 from src.application.errors.external import (
     AnalysisError as AnalysisError,
     AnalysisNotConfigured as AnalysisNotConfigured,
 )
-from src.setting.config import Settings
-
-#: Ответ воркфлоу приходит целиком, а не потоком: разбирать частичный JSON
-#: незачем — до валидации он всё равно бесполезен.
-RESPONSE_MODE: Final[str] = "blocking"
-
-#: Кем воркфлоу видит вызывающего. Не пользователь: этап работает сам по себе,
-#: и подставлять сюда чей-то идентификатор значило бы приписывать человеку
-#: действия ночного конвейера.
-WORKFLOW_USER: Final[str] = "speech-pipeline"
+from src.application.ports.model_requests import ModelRequestPreparer
 
 
 class SpeechAnalysisClient(BaseModel):
-    """Один вызов: отдать разговор, получить тему, тональность и резюме."""
+    """Исполнить подготовленный запрос и вернуть текст модели для бизнес-проверки."""
 
     model_config = ConfigDict(frozen=True, arbitrary_types_allowed=True)
-
     base_url: str
-    app_key: str = Field(repr=False)
-    timeout_seconds: float = 120.0
+    api_key: str = Field(default="", repr=False)
+    preparer: ModelRequestPreparer = Field(repr=False)
+    scenario: ModelScenario = "analysis"
+    profile: ModelProfile = "production"
+    timeout_seconds: float = Field(default=120.0, gt=0)
 
-    async def run(self, inputs: dict[str, Any]) -> dict[str, Any]:
-        """Выполнить воркфлоу и вернуть его `outputs`.
+    async def run(self, inputs: dict[str, JsonValue]) -> dict[str, JsonValue]:
+        """Получить готовый DTO и вызвать /chat/completions.
 
-        Как значения приводятся к полям входа — см. `_as_input`.
+        Вход — именованные данные сценария, выход — текст под ключом answer.
+        Сетевые ошибки и 408/429/5xx допускают повтор. Неверная конфигурация,
+        отказ модели и обрыв по лимиту ответа требуют отдельного решения.
+        Тело разговора, ответа и секреты в сообщения ошибок не включаются.
         """
+        prepared = await self.preparer.prepare(
+            ModelPreparationRequest(scenario=self.scenario, profile=self.profile, inputs=inputs)
+        )
         payload = {
-            "inputs": {key: _as_input(value) for key, value in inputs.items()},
-            "response_mode": RESPONSE_MODE,
-            "user": WORKFLOW_USER,
+            "model": prepared.model,
+            "messages": [message.model_dump() for message in prepared.messages],
+            "temperature": prepared.temperature,
+            "max_tokens": prepared.max_tokens,
         }
+        headers = {"Authorization": f"Bearer {self.api_key}"} if self.api_key else {}
         try:
             async with httpx.AsyncClient(timeout=self.timeout_seconds) as client:
                 response = await client.post(
-                    f"{self.base_url}/workflows/run",
-                    headers={"Authorization": f"Bearer {self.app_key}"},
-                    json=payload,
+                    f"{self.base_url}/chat/completions", headers=headers, json=payload
                 )
         except httpx.TimeoutException as exc:
             raise AnalysisError("timeout", retryable=True) from exc
         except httpx.HTTPError as exc:
             raise AnalysisError("unreachable", retryable=True) from exc
-
-        if response.status_code >= 500:
-            raise AnalysisError(f"http_{response.status_code}", retryable=True)
         if response.status_code >= 400:
-            # 4xx — это неверный ключ или неверная форма входа. Повтор даст то
-            # же самое; чинить надо настройку или сам воркфлоу.
-            raise AnalysisError(f"http_{response.status_code}", retryable=False)
-
+            raise AnalysisError(
+                f"http_{response.status_code}",
+                retryable=response.status_code in (408, 429) or response.status_code >= 500,
+            )
         try:
             body = response.json()
-        except ValueError as exc:
-            raise AnalysisError("malformed_response", retryable=True) from exc
-        return _outputs(body)
-
-
-def _as_input(value: Any) -> Any:
-    """Значение в том виде, в каком его принимает поле входа воркфлоу.
-
-    Три правила, и каждое куплено формой чужого API:
-
-    * **флаг уходит числом.** Логического типа у полей входа Dify нет — есть
-      строка, абзац, число, список, файл, — и флаг приходится объявлять числом.
-      Питоновский `True` прошёл бы проверку числа случайно (`bool` там наследник
-      `int`), но опираться на это нельзя: проверка написана про числа. Одна
-      правка на их стороне — и воркфлоу отвечает `400` на каждый звонок, а
-      выглядит это как «Dify сломался»;
-    * **вложенное уходит строкой JSON.** Поля скалярные, и список реплик,
-      переданный массивом, доехал бы туда неузнаваемым;
-    * **скаляры и `None` — как есть.**
-    """
-    if isinstance(value, bool):
-        return int(value)
-    if isinstance(value, (str, int, float)) or value is None:
-        return value
-    return json.dumps(value, ensure_ascii=False)
-
-
-def _outputs(body: Any) -> dict[str, Any]:
-    """Извлечь структурный outputs воркфлоу либо вернуть ошибку формата."""
-    if not isinstance(body, dict):
-        raise AnalysisError("malformed_response", retryable=True)
-    data = body.get("data")
-    if not isinstance(data, dict):
-        raise AnalysisError("malformed_response", retryable=True)
-    status = str(data.get("status") or "")
-    if status and status != "succeeded":
-        # Воркфлоу отработал и сам сообщил об отказе — это его внутренняя
-        # ошибка, а не наша. Повторить стоит: узел мог не дождаться модели.
-        raise AnalysisError(f"workflow_{status}", retryable=True)
-    outputs = data.get("outputs")
-    if not isinstance(outputs, dict):
-        raise AnalysisError("no_outputs", retryable=True)
-    return outputs
-
-
-def build_analysis_client(settings: Settings) -> SpeechAnalysisClient:
-    """Собрать клиент по настройкам `SPEECH_DIFY_*`.
-
-    Отказ при пустом адресе или ключе, а не молчаливое отключение: воркер, тихо
-    решивший, что анализировать нечем, оставил бы суточный пакет без тем и
-    тональности, ничего об этом не сказав.
-    """
-    base_url = str(getattr(settings, "speech_dify_base_url", "") or "").strip().rstrip("/")
-    app_key = str(getattr(settings, "speech_dify_app_key", "") or "").strip()
-    if not base_url or not app_key:
-        raise AnalysisNotConfigured(
-            "call analysis needs SPEECH_DIFY_BASE_URL and SPEECH_DIFY_APP_KEY; without them "
-            "the daily batch would be searchable but unlabelled, and nothing would say why"
-        )
-    return SpeechAnalysisClient(
-        base_url=base_url,
-        app_key=app_key,
-        timeout_seconds=float(getattr(settings, "speech_dify_timeout_seconds", 120.0)),
-    )
+        except ValueError:
+            raise AnalysisError("malformed_response", retryable=True) from None
+        if not isinstance(body, dict):
+            raise AnalysisError("malformed_response", retryable=True)
+        choices = body.get("choices")
+        if not isinstance(choices, list) or not choices or not isinstance(choices[0], dict):
+            raise AnalysisError("malformed_response", retryable=True)
+        choice = choices[0]
+        if choice.get("finish_reason") == "length":
+            raise AnalysisError("output_truncated", retryable=False)
+        message = choice.get("message")
+        if not isinstance(message, dict):
+            raise AnalysisError("malformed_response", retryable=True)
+        if message.get("refusal"):
+            raise AnalysisError("model_refused", retryable=False)
+        content = message.get("content")
+        if not isinstance(content, str) or not content.strip():
+            raise AnalysisError("empty_response", retryable=True)
+        return {"answer": content}

@@ -19,7 +19,7 @@ def build_parser() -> argparse.ArgumentParser:
         help=(
             "этапы через запятую: ingest,transcribe,analyze. "
             "Пусто — все три. Ограничение нужно, когда этап заведомо "
-            "невозможен: например, приложение Dify ещё не создано"
+            "невозможен: например, приложение LLM ещё не создано"
         ),
     )
     return parser

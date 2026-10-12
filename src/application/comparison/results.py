@@ -150,7 +150,7 @@ class ReasonTally(BaseModel):
         answered = self.runs - self.failed - self.no_code
         return [
             f"{self.name}:",
-            f"  прогонов {self.runs}, сбой Dify {self.failed}, без кода {self.no_code}",
+            f"  прогонов {self.runs}, сбой LLM {self.failed}, без кода {self.no_code}",
             f"  с сохранённым кодом: тот же код {_percent(self.same_code, answered)}"
             f" ({self.same_code} из {answered}),"
             f" та же группа {_percent(self.same_group, answered)}",

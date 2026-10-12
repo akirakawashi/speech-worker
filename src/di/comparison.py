@@ -9,38 +9,26 @@ from typing import Final
 from src.application.comparison.results import summarize, summarize_reasons
 from src.application.comparison.service import compare, compare_reasons
 from src.application.dto.calls import CallSource
+from src.application.dto.model_execution import ModelScenario
 from src.application.errors.reasons import ReasonsNotConfigured
+from src.di.analysis import build_analysis_client
 from src.di.pipeline import build_stage_deps
 from src.di.reasons import build_reason_client
 from src.domain.calls.period import period_bounds
-from src.infrastructure.clients.analysis import SpeechAnalysisClient, build_analysis_client
+from src.infrastructure.clients.analysis import SpeechAnalysisClient
 from src.infrastructure.persistence.comparison import PostgresComparisonRepository
 from src.infrastructure.reports.comparison import write_csv, write_reasons_csv
 from src.setting.config import Settings
 
-CANDIDATE_KEY_ENV: Final[str] = "SPEECH_DIFY_CANDIDATE_APP_KEY"
+CANDIDATE_MODEL_ENV: Final[str] = "SPEECH_ANALYSIS_LLM_CANDIDATE_MODEL"
 MAX_LIMIT: Final[int] = 1000
 
 
-def build_candidate_client(settings: Settings) -> SpeechAnalysisClient:
-    """Собрать клиент отдельного приложения-кандидата, отклонив боевой ключ."""
-    base_url = str(getattr(settings, "speech_dify_base_url", "") or "").strip().rstrip("/")
-    app_key = settings.speech_dify_candidate_app_key.strip()
-    if not base_url or not app_key:
-        raise SystemExit(f"the candidate needs SPEECH_DIFY_BASE_URL and {CANDIDATE_KEY_ENV}")
-    production = {
-        str(getattr(settings, name, "") or "").strip()
-        for name in ("speech_dify_app_key", "speech_dify_reason_app_key")
-    }
-    if app_key in production:
-        # Кандидат с ключом боевого приложения сравнил бы модель саму с собой и
-        # показал бы полное согласие — без единого слова о том, что сверки не было.
-        raise SystemExit(f"{CANDIDATE_KEY_ENV} is a production app key, not a candidate")
-    return SpeechAnalysisClient(
-        base_url=base_url,
-        app_key=app_key,
-        timeout_seconds=float(getattr(settings, "speech_dify_timeout_seconds", 120.0)),
-    )
+def build_candidate_client(
+    settings: Settings, *, scenario: ModelScenario = "analysis"
+) -> SpeechAnalysisClient:
+    """Собрать кандидатный профиль; отдельную модель проверяет бэкенд."""
+    return build_analysis_client(settings, scenario=scenario, profile="candidate")
 
 
 def run_comparison_command(args: argparse.Namespace) -> int:
@@ -58,7 +46,11 @@ def run_comparison_command(args: argparse.Namespace) -> int:
     sessionmaker = get_speech_ms_sessionmaker(settings)
     repository = PostgresComparisonRepository(sessionmaker)
     start, end = period_bounds(first, last, settings.speech_display_timezone)
-    candidate = build_candidate_client(settings) if args.apply else None
+    candidate = (
+        build_candidate_client(settings, scenario="reason" if args.app == "reasons" else "analysis")
+        if args.apply
+        else None
+    )
     control: SpeechAnalysisClient | None = None
     if args.apply and args.control:
         if args.app == "reasons":
@@ -88,8 +80,8 @@ def run_comparison_command(args: argparse.Namespace) -> int:
             f" (период {first}…{last}, источник {source.value}, предел {args.limit})"
         )
         if candidate is None:
-            configured = bool(str(getattr(settings, "speech_dify_reason_app_key", "") or ""))
-            echo(f"ключ боевого приложения причин в контейнере: {'есть' if configured else 'нет'}")
+            configured = bool(settings.speech_analysis_llm_base_url)
+            echo(f"адрес модели причин настроен: {'есть' if configured else 'нет'}")
             echo("это была проверка; чтобы спросить модели, добавьте --apply")
             return 0
         rows = await compare_reasons(

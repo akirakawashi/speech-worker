@@ -6,9 +6,9 @@ import asyncio
 
 from src.application.dto.calls import JobKind
 from src.application.dto.worker import WorkerOptions
+from src.di.analysis import build_analysis_client
 from src.di.pipeline import build_registry, build_stage_deps
 from src.di.sources import build_worker_source
-from src.infrastructure.clients.analysis import build_analysis_client
 from src.infrastructure.clients.whisper import build_whisper_client
 from src.infrastructure.persistence.session import (
     SPEECH_REQUIRED_SCHEMA_REVISION,

@@ -10,7 +10,7 @@ Two properties the implementation exists for:
 row's work is finished, and the delete is conditioned on that column being NOT
 NULL. A row whose work was never finished is not old, it is late.
 
-**Deletes are batched.** This runs against a cluster shared with Dify. A single
+**Deletes are batched.** This runs against a cluster shared with LLM. A single
 `DELETE` over a year of rows holds locks for as long as it takes; a bounded
 batch, repeated, gives every other user of the cluster a gap to move in.
 """

@@ -36,7 +36,7 @@ async def ask_reason(
     codes: frozenset[str],
     segments: Sequence[AnalysisSegment],
 ) -> ReasonAnswer | None:
-    """Причина одного звонка. `None` — Dify недоступен после повторов."""
+    """Причина одного звонка. `None` — LLM недоступен после повторов."""
     inputs: dict[str, JsonValue] = {
         "call_id": str(call_id),
         "reasons": reference,

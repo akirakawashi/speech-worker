@@ -79,12 +79,13 @@ class Settings(BaseSettings):
     speech_whisper_timeout_seconds: float = Field(default=600.0, ge=30.0, le=1800.0)
     speech_whisper_vad_filter: bool = True
 
-    # Существующие приложения разбора, причин обращения и сравнения.
-    speech_dify_base_url: str = ""
-    speech_dify_app_key: str = ""
-    speech_dify_reason_app_key: str = ""
-    speech_dify_candidate_app_key: str = ""
-    speech_dify_timeout_seconds: float = Field(default=120.0, ge=10.0, le=280.0)
+    # Воркер получает готовый запрос у бэкенда и вызывает модель напрямую.
+    speech_backend_base_url: str = ""
+    speech_worker_api_token: str = Field(default="", repr=False)
+    speech_backend_timeout_seconds: float = Field(default=30.0, ge=1.0, le=120.0)
+    speech_analysis_llm_base_url: str = ""
+    speech_analysis_llm_api_key: str = Field(default="", repr=False)
+    speech_analysis_llm_timeout_seconds: float = Field(default=120.0, ge=10.0, le=280.0)
 
     # Оценка продаж Телфина запускается отдельной командой.
     speech_quality_llm_base_url: str = ""

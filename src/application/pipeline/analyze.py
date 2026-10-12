@@ -21,7 +21,7 @@
 **Причина обращения** (S-32) — в том же ответе: зачем звонил клиент, фразой и
 кодом справочника `speech_call_reasons`. Поля необязательные: пустой справочник
 или ответ без причины разбор не роняют, а старая редакция воркфлоу вход
-`reasons` просто не объявляет — Dify отбрасывает необъявленный вход.
+`reasons` просто не объявляет — LLM отбрасывает необъявленный вход.
 """
 
 from __future__ import annotations
@@ -187,7 +187,7 @@ class AnalyzeHandler(StageHandler[AnalyzeWork]):
                     f"analysis workflow failed: {exc.reason}",
                 ) from exc
 
-            # Сырой ответ модели приводится к объекту здесь, а не в Dify:
+            # Сырой ответ модели приводится к объекту здесь, а не в LLM:
             # разбор решает, годен ли ответ, и место ему там, где он покрыт
             # тестами, а не в поле GUI, исполнение которого зависит от службы
             # песочницы.
@@ -239,7 +239,7 @@ class AnalyzeHandler(StageHandler[AnalyzeWork]):
 
 
 #: Поля, в которых воркфлоу может вернуть сырой ответ модели. `answer` — как
-#: называет его Dify в приложениях-чатах, `text` — как называется выход узла
+#: называет его LLM в приложениях-чатах, `text` — как называется выход узла
 #: модели; воркфлоу отдаёт одно из двух в зависимости от того, как собран.
 _RAW_ANSWER_KEYS: Final[tuple[str, ...]] = ("answer", "text", "output")
 
@@ -276,7 +276,7 @@ def describe_raw_problem(outputs: Any) -> str | None:
         if "{" not in stripped:
             return "the model answered without a JSON object"
         return None
-    return "the workflow returned no answer at all"
+    return "the model returned no answer at all"
 
 
 def normalise_outputs(outputs: Any) -> dict[str, Any]:
@@ -285,7 +285,7 @@ def normalise_outputs(outputs: Any) -> dict[str, Any]:
     Две формы, и обе настоящие:
 
     * **разобранная** — воркфлоу сам вернул `path`, `sentiment` и прочее.
-      Так было задумано изначально, и так будет, если узел кода в Dify
+      Так было задумано изначально, и так будет, если узел кода в LLM
       заработает;
     * **сырая** — воркфлоу вернул текст ответа модели одним полем. Так он
       устроен сейчас: узел кода зависит от службы песочницы, а она на боевом

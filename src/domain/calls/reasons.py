@@ -44,7 +44,7 @@ _CODE_IN_ANSWER: Final[re.Pattern[str]] = re.compile(r"^\s*(K[0-9]{2})\b", re.IG
 _CODE_LOOKALIKES: Final[dict[int, str]] = str.maketrans({"К": "K", "к": "K"})
 
 #: Сколько знаков справочника принимает вход `reasons` воркфлоу
-#: (`max_length` в `dify/speech/speech-call-analysis.dify.yml`). Длиннее — Dify
+#: (`max_length` в `llm/speech/speech-call-analysis.llm.yml`). Длиннее — LLM
 #: отвечает `400` на весь разбор, а не только на причину; загрузка справочника
 #: такой файл отвергает, а этап такой справочник не шлёт.
 REASONS_PROMPT_LIMIT: Final[int] = 16_000

@@ -45,7 +45,7 @@ class ReasonOutcome(BaseModel):
     model_config = ConfigDict(frozen=True)
 
     code: str | None
-    #: Dify не ответил и после повторов `ask_reason`.
+    #: LLM не ответил и после повторов `ask_reason`.
     failed: bool
     seconds: float
 

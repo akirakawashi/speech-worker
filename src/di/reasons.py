@@ -5,8 +5,10 @@ import asyncio
 from datetime import UTC, date, datetime, timedelta
 from zoneinfo import ZoneInfo
 
+from src.application.errors.external import AnalysisNotConfigured
 from src.application.errors.reasons import ReasonsNotConfigured
 from src.application.reasons.batch import fill_reasons
+from src.di.analysis import build_analysis_client
 from src.domain.calls.period import period_bounds
 from src.infrastructure.clients.analysis import SpeechAnalysisClient
 from src.infrastructure.persistence.reasons import PostgresReasonRepository
@@ -15,19 +17,11 @@ from src.setting.config import Settings, get_settings
 
 
 def build_reason_client(settings: Settings) -> SpeechAnalysisClient:
-    """Собрать клиент приложения причин по явным настройкам; пустые отклонить."""
-    base_url = str(getattr(settings, "speech_dify_base_url", "") or "").strip().rstrip("/")
-    app_key = str(getattr(settings, "speech_dify_reason_app_key", "") or "").strip()
-    if not base_url or not app_key:
-        raise ReasonsNotConfigured(
-            "reasons need SPEECH_DIFY_BASE_URL and SPEECH_DIFY_REASON_APP_KEY "
-            "(the «Speech: причина обращения» app)"
-        )
-    return SpeechAnalysisClient(
-        base_url=base_url,
-        app_key=app_key,
-        timeout_seconds=float(getattr(settings, "speech_dify_timeout_seconds", 120.0)),
-    )
+    """Собрать прямой вызов модели для сценария причин с промптом бэкенда."""
+    try:
+        return build_analysis_client(settings, scenario="reason")
+    except AnalysisNotConfigured as exc:
+        raise ReasonsNotConfigured(str(exc)) from None
 
 
 def run_reason_command(args: argparse.Namespace) -> int:
