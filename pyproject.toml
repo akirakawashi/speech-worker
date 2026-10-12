@@ -1,0 +1,87 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "speech-worker"
+version = "0.1.0"
+description = "Independent worker for call ingestion, Whisper transcription and operator evaluation."
+requires-python = ">=3.12"
+dependencies = [
+  "pydantic>=2.13.5,<3",
+  "pydantic-settings>=2.14.1,<3",
+  "httpx>=0.28.1,<0.29",
+  "sqlalchemy[asyncio]>=2.0.50,<2.1",
+  "asyncpg>=0.31.0,<0.32",
+  "tzdata>=2026.1",
+]
+
+[project.optional-dependencies]
+dev = [
+  "mypy>=2.3.0,<3",
+  "pytest>=9.1.1,<10",
+  "pytest-asyncio>=1.4.0,<2",
+  "ruff>=0.16.0,<0.17",
+  "PyYAML>=6,<7",
+  "types-PyYAML>=6,<7",
+]
+
+[project.scripts]
+speech-worker = "src.presentation.cli.worker:main"
+speech-ingest = "src.presentation.cli.daily_ingest:main"
+speech-backfill = "src.presentation.cli.backfill:main"
+speech-evaluate = "src.presentation.cli.evaluate:main"
+speech-reanalyze = "src.presentation.cli.reanalyze:main"
+speech-sync-directories = "src.presentation.cli.directory_sync:main"
+speech-prune = "src.presentation.cli.prune:main"
+speech-fill-reasons = "src.presentation.cli.fill_reasons:main"
+speech-classifier-backfill = "src.presentation.cli.classifier_backfill:main"
+speech-seed-classifier = "src.presentation.cli.seed_classifier:main"
+speech-seed-call-reasons = "src.presentation.cli.seed_call_reasons:main"
+speech-compare-models = "src.presentation.cli.compare_models:main"
+
+[tool.setuptools.packages.find]
+include = ["src*"]
+exclude = ["tests*"]
+
+[tool.setuptools.package-data]
+"src.infrastructure.data" = ["*.json"]
+
+[tool.pytest.ini_options]
+minversion = "9.0"
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
+testpaths = ["tests"]
+pythonpath = ["."]
+addopts = "--basetemp=.pytest-tmp -p no:cacheprovider"
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]
+
+[tool.ruff.lint.isort]
+combine-as-imports = true
+
+[tool.mypy]
+python_version = "3.12"
+strict = true
+plugins = ["pydantic.mypy"]
+mypy_path = "."
+explicit_package_bases = true
+
+[[tool.mypy.overrides]]
+module = "tests.*"
+strict = false
+disable_error_code = [
+  "no-untyped-def",
+  "no-untyped-call",
+  "attr-defined",
+  "type-arg",
+  "index",
+  "arg-type",
+  "call-overload",
+  "unused-ignore",
+]

@@ -1,0 +1,28 @@
+"""Типы и операции классификатора для контрактов адаптеров."""
+
+from src.domain.calls.classifier import (
+    _INVISIBLE as _INVISIBLE,
+    _PLACEHOLDER as _PLACEHOLDER,
+    _PRODUCT_BY_KEY as _PRODUCT_BY_KEY,
+    _SEGMENT_BY_KEY as _SEGMENT_BY_KEY,
+    _SLASH as _SLASH,
+    CLASSIFIER_DEPTH as CLASSIFIER_DEPTH,
+    EMPTY_LEVEL_LABEL as EMPTY_LEVEL_LABEL,
+    LABEL_LIMIT as LABEL_LIMIT,
+    NCC_SORT_ORDER as NCC_SORT_ORDER,
+    PATH_SEPARATOR as PATH_SEPARATOR,
+    TOPIC_LEVEL as TOPIC_LEVEL,
+    ClassifierIndex as ClassifierIndex,
+    ClassifierNode as ClassifierNode,
+    NodePaths as NodePaths,
+    ResolvedPath as ResolvedPath,
+    _is_empty_level as _is_empty_level,
+    classifier_levels as classifier_levels,
+    clean_label as clean_label,
+    dimensions as dimensions,
+    label_key as label_key,
+    level_match as level_match,
+    path_caption as path_caption,
+    present_levels as present_levels,
+    suggestion_labels as suggestion_labels,
+)

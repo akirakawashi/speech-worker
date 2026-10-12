@@ -1,0 +1,10 @@
+[Unit]
+Description=Speech Worker NCC ingestion every 15 minutes
+
+[Timer]
+OnCalendar=*-*-* *:00/15:00 Europe/Moscow
+Persistent=true
+Unit=speech-ingest-ncc.service
+
+[Install]
+WantedBy=timers.target

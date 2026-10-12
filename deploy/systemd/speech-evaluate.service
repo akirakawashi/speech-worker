@@ -1,0 +1,10 @@
+[Unit]
+Description=Speech Worker Telphin script evaluation
+Requires=docker.service
+After=docker.service network-online.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=/opt/speech-worker
+ExecStart=/usr/bin/docker compose run --rm --no-deps worker speech-evaluate --all --limit 100 --skip-failed --apply
+TimeoutStartSec=infinity

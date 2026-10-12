@@ -1,0 +1,10 @@
+[Unit]
+Description=Speech Worker NCC ingestion
+Requires=docker.service
+After=docker.service network-online.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=/opt/speech-worker
+ExecStart=/usr/bin/docker compose run --rm --no-deps worker speech-ingest --catch-up --source ncc --immediate-share 0.5 --night-from 19 --night-until 7
+TimeoutStartSec=infinity

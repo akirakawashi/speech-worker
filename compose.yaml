@@ -1,0 +1,17 @@
+services:
+  worker:
+    build: .
+    image: speech-worker:local
+    restart: unless-stopped
+    init: true
+    # Linux GPU-хост: доступ к уже существующему HTTP Whisper/model-proxy.
+    network_mode: host
+    env_file: .env
+    environment:
+      SPEECH_WORKER_TEMP_DIR: /var/tmp/speech-worker
+    volumes:
+      - worker-tmp:/var/tmp/speech-worker
+    stop_grace_period: 35m
+
+volumes:
+  worker-tmp:
