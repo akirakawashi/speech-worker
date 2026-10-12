@@ -4,7 +4,7 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
-from src.domain.calls.contracts import JobKind, JobLane
+from src.domain.calls.contracts import CallSource, JobKind, JobLane
 
 
 class WorkerOptions(BaseModel):
@@ -12,9 +12,21 @@ class WorkerOptions(BaseModel):
 
     model_config = ConfigDict(frozen=True, extra="forbid")
 
-    lanes: tuple[JobLane, ...] = Field(default=(JobLane.DAILY,), min_length=1)
+    lanes: tuple[JobLane, ...] = Field(default=(JobLane.DAILY, JobLane.BACKFILL), min_length=1)
     stages: tuple[JobKind, ...] = Field(default=tuple(JobKind), min_length=1)
     once: bool = False
+    queue_only: bool = False
+    sources: tuple[CallSource, ...] = Field(
+        default=(CallSource.NCC, CallSource.TELPHIN), min_length=1
+    )
+
+    @field_validator("sources", mode="before")
+    @classmethod
+    def parse_sources(cls, value: Any) -> Any:
+        """Проверить явно выбранные источники автоматического приёма."""
+        if isinstance(value, str):
+            return tuple(dict.fromkeys(part.strip() for part in value.split(",") if part.strip()))
+        return value
 
     @field_validator("lanes", mode="before")
     @classmethod

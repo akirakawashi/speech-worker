@@ -654,17 +654,15 @@ async def test_a_timeout_is_retryable(monkeypatch: pytest.MonkeyPatch) -> None:
 class _Settings:
     speech_quality_llm_base_url = "http://10.0.0.1:8000/v1/"
     speech_quality_llm_api_key = "super-secret-value"
-    speech_quality_llm_model = ""
     speech_quality_llm_timeout_seconds = 30.0
-    speech_quality_llm_max_tokens = 2048
 
 
 def test_the_client_is_built_from_settings() -> None:
     client = build_quality_client(_Settings())
     assert client.base_url == "http://10.0.0.1:8000/v1"
-    assert client.model == "qwen3.8-27b-fast"
+    assert client.model == "prepared-by-backend"
     assert client.timeout_seconds == 30.0
-    assert client.max_tokens == 2048
+    assert client.max_tokens == 4096
     assert "super-secret-value" not in repr(client)
 
 

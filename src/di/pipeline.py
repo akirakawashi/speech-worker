@@ -1,7 +1,7 @@
 """Сборка обработчиков конвейера и их заменяемых внешних портов.
 
-Реестр содержит ingest, transcribe и analyze. Выбранные этапы обязаны иметь
-обработчики и настроенные зависимости до начала обработки заданий.
+Реестр содержит ingest, transcribe, analyze и независимый этап evaluate.
+Выбранные этапы обязаны иметь обработчики и настроенные зависимости до начала работы.
 """
 
 from __future__ import annotations
@@ -11,9 +11,11 @@ from typing import Any
 
 from src.application.dto.pipeline_settings import PipelineSettings
 from src.application.pipeline.analyze import AnalyzeHandler
+from src.application.pipeline.evaluate import EvaluateHandler
 from src.application.pipeline.ingest import IngestHandler
 from src.application.pipeline.stages import StageHandler, StageRegistry
 from src.application.pipeline.transcribe import TranscribeHandler
+from src.application.ports.quality_execution import QualityExecutor
 from src.application.ports.recordings import (
     AnalysisBackend,
     RecordingStorage,
@@ -37,6 +39,7 @@ def build_stage_deps(
     storage: ObjectStorageTransport | RecordingStorage | None = None,
     transcription: RecordingTranscriber | None = None,
     analysis: AnalysisBackend | None = None,
+    evaluation: QualityExecutor | None = None,
     runtime_settings: dict[str, Any] | None = None,
 ) -> WorkerResources:
     """Собрать порты этапов и отдельно сохранить фабрику транзакций исполнителя.
@@ -66,6 +69,7 @@ def build_stage_deps(
         else None,
         transcription=transcription,
         analysis=analysis,
+        evaluation=evaluation,
         runtime_settings=PipelineSettings.model_validate(runtime_settings or {}),
     )
 
@@ -73,7 +77,7 @@ def build_stage_deps(
 def build_registry(stages: Collection[JobKind] | None = None) -> StageRegistry:
     """Реестр этапов для боевого воркера.
 
-    `stages` ограничивает набор. По умолчанию — все три, и это правильное
+    `stages` ограничивает набор. По умолчанию — все четыре, и это правильное
     умолчание: воркер, который молча не берёт какой-то этап, оставляет суточный
     пакет наполовину обработанным без единого сообщения.
 
@@ -86,6 +90,7 @@ def build_registry(stages: Collection[JobKind] | None = None) -> StageRegistry:
         JobKind.INGEST: IngestHandler(),
         JobKind.TRANSCRIBE: TranscribeHandler(),
         JobKind.ANALYZE: AnalyzeHandler(),
+        JobKind.EVALUATE: EvaluateHandler(),
     }
     wanted = set(handlers) if stages is None else set(stages)
     unknown = wanted - set(handlers)

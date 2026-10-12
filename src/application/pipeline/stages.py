@@ -34,6 +34,7 @@ from src.application.dto.pipeline import (
 from src.application.dto.pipeline_settings import PipelineSettings
 from src.application.ports.media import MediaProcessor
 from src.application.ports.pipeline import StagePersistence, StageRepository
+from src.application.ports.quality_execution import QualityExecutor
 from src.application.ports.queue import ClaimedJob
 from src.application.ports.recordings import (
     AnalysisBackend,
@@ -123,6 +124,7 @@ class StageDeps(BaseModel):
     storage: RecordingStorage | None = None
     transcription: RecordingTranscriber | None = None
     analysis: AnalysisBackend | None = None
+    evaluation: QualityExecutor | None = None
     #: Validated DB snapshot for this job; deployment secrets stay in settings.
     runtime_settings: PipelineSettings = Field(default_factory=PipelineSettings)
 

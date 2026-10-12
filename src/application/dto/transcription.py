@@ -1,9 +1,4 @@
-"""Domain contract for speech transcription.
-
-Nothing in this module knows which provider is configured. Callers depend on
-`TranscriptionProvider`, so swapping OpenRouter for a self-hosted OpenAI
-compatible endpoint is a configuration change, not a code change.
-"""
+"""DTO записи, сегментов, результата и нормализованной ошибки распознавания."""
 
 from __future__ import annotations
 
@@ -11,12 +6,10 @@ from typing import Final, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from src.application.dto.adapter import AdapterCallStatus, AdapterExecutionTelemetry
-
 TRANSCRIPTION_CONTRACT_VERSION: Final = "1.0"
 TRANSCRIPTION_ADAPTER_NAME: Final = "speech_transcription"
 
-TranscriptionProviderKind = Literal["openrouter", "openai_compatible"]
+TranscriptionProviderKind = Literal["openai_compatible"]
 
 # Deliberately identical to AdapterFailureReason: the normalized audit `reason`
 # must not introduce a vocabulary of its own.
@@ -105,123 +98,9 @@ class TranscriptionError(Exception):
         *,
         status_code: int | None = None,
         detail_code: TranscriptionDetailCode | None = None,
-        outcome: TranscriptionOutcome | None = None,
     ) -> None:
         """Настроить TranscriptionError из переданных параметров и зависимостей."""
         self.reason = reason
         self.status_code = status_code
         self.detail_code = detail_code
-        self.outcome = outcome
         super().__init__(f"transcription_failed:{reason}")
-
-
-class TranscriptionMetadata(BaseModel):
-    """Публичные метаданные настроенного движка без адреса и ключа."""
-
-    model_config = ConfigDict(frozen=True)
-    kind: TranscriptionProviderKind
-    model: str
-    source: str
-    base_url_setting: str
-    audio_window_seconds: float | None
-    network_zone: str
-    auth_mode: str
-    owner: str
-    version: str
-
-
-_UNCONFIGURED_TARGET_KEY = "transcription_base_url"
-
-_UNCONFIGURED_NETWORK_ZONE = "external"
-
-_UNCONFIGURED_AUTH_MODE = "optional_service_credential"
-
-_UNCONFIGURED_OWNER = "aicistent"
-
-_UNCONFIGURED_VERSION = "1.0.0"
-
-
-class TranscriptionOutcome(BaseModel):
-    """Итог вызова распознавания для безопасного журнала и метрик."""
-
-    model_config = ConfigDict(frozen=True)
-
-    status: AdapterCallStatus
-    reason: TranscriptionFailureReason | None
-    elapsed_ms: int
-    request_id: str | None
-    telemetry: AdapterExecutionTelemetry
-    config: TranscriptionMetadata | None
-    request: TranscriptionRequest | None
-    result: TranscriptionResult | None
-    status_code: int | None = None
-    detail_code: TranscriptionDetailCode | None = None
-
-    def audit_payload(self, *, extra: dict[str, object] | None = None) -> dict[str, object]:
-        """Вернуть метаданные распознавания для журнала без аудио и секретов."""
-        if self.config is not None:
-            configuration_key = self.config.base_url_setting
-            network_zone: str = self.config.network_zone
-            auth_mode: str = self.config.auth_mode
-            owner = self.config.owner
-            version = self.config.version
-        else:
-            configuration_key = _UNCONFIGURED_TARGET_KEY
-            network_zone = _UNCONFIGURED_NETWORK_ZONE
-            auth_mode = _UNCONFIGURED_AUTH_MODE
-            owner = _UNCONFIGURED_OWNER
-            version = _UNCONFIGURED_VERSION
-
-        payload: dict[str, object] = {
-            "adapter": TRANSCRIPTION_ADAPTER_NAME,
-            "status": self.status,
-            "elapsed_ms": self.elapsed_ms,
-            "request_id": self.request_id,
-            "request_attempts": self.telemetry.request_attempts,
-            "retry_count": self.telemetry.retry_count,
-            "max_attempts_per_request": self.telemetry.max_attempts,
-            "total_timeout_ms": self.telemetry.total_timeout_ms,
-            "adapter_owner": owner,
-            "adapter_version": version,
-            "future_service": "adapter-transcription",
-            "operation_type": "read",
-            "failure_mode": "fail_closed",
-            "target": {
-                "origin": "[redacted]",
-                "configured": self.config is not None,
-                "configuration_key": configuration_key,
-                "network_zone": network_zone,
-                "auth_mode": auth_mode,
-            },
-            "transcription_contract_version": TRANSCRIPTION_CONTRACT_VERSION,
-        }
-
-        if self.reason is not None:
-            payload["reason"] = self.reason
-        if self.config is not None:
-            payload["provider_kind"] = self.config.kind
-            payload["config_source"] = self.config.source
-            payload["transcription_model"] = self.config.model
-            payload["audio_window_seconds"] = self.config.audio_window_seconds
-        if self.request is not None:
-            payload["audio_format"] = self.request.audio_format
-            payload["language_requested"] = self.request.language
-        if self.result is not None:
-            payload["language_detected"] = self.result.language
-            payload["audio_duration_seconds"] = self.result.duration_seconds
-            payload["truncation_check"] = self.result.truncation_check
-            payload["transcript_chars"] = len(self.result.text)
-        if self.status_code is not None:
-            payload["provider_status_code"] = self.status_code
-        if self.detail_code is not None:
-            payload["provider_detail_code"] = self.detail_code
-
-        if extra:
-            collisions = payload.keys() & extra.keys()
-            if collisions:
-                names = ", ".join(sorted(collisions))
-                raise ValueError(
-                    f"Transcription audit extras cannot override normalized fields: {names}"
-                )
-            payload.update(extra)
-        return payload

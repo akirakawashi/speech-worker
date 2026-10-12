@@ -240,6 +240,13 @@ def test_factory_builds_the_local_export_source(export: Path) -> None:
     assert source.name == "local-export"
 
 
+def test_factory_rejects_the_abandoned_case_listing_source() -> None:
+    """Режим rest должен остановить запуск, а не вернуть пустой список звонков."""
+    settings = Settings(_env_file=None, speech_ncc_source_kind="rest")
+    with pytest.raises(RuntimeError, match="опровергнут"):
+        build_daily_batch_source(settings)
+
+
 def test_declared_but_unimplemented_kinds_say_so() -> None:
     """`storage` объявлен и не реализован — это разные состояния от опечатки."""
     settings = Settings(_env_file=None, speech_ncc_source_kind="storage")  # type: ignore[call-arg]

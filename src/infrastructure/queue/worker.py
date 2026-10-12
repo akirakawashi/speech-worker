@@ -23,7 +23,7 @@ import socket
 import uuid
 from collections.abc import AsyncIterator, Sequence
 from contextlib import asynccontextmanager
-from typing import Any, Final
+from typing import Any, Final, Protocol
 
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -462,6 +462,8 @@ async def mark_call_after_dead_job(
     Без этого звонок оставался бы в статусе «в очереди» навсегда и попадал бы в
     счётчик «в очереди на расшифровку» — тот, что видит пользователь на экране.
     """
+    if kind is JobKind.EVALUATE:
+        return
     if kind is JobKind.ANALYZE:
         await session.execute(
             text(
@@ -529,6 +531,8 @@ async def _apply_call_status(session: AsyncSession, job: ClaimedJob, result: Sta
     звонком закончена», и проставить её на середине значило бы разрешить
     удалять недоделанное.
     """
+    if result.processing_status is None:
+        return
     await session.execute(
         text(
             "UPDATE speech_calls SET processing_status = :status, updated_at = now(), "
@@ -563,26 +567,15 @@ def _lease_for(kind: JobKind) -> int:
     return 900 if kind is JobKind.TRANSCRIBE else 300
 
 
-def parse_lanes(raw: str) -> list[JobLane]:
-    """Прочитать список полос CLI; неизвестную или пустую полосу отклонить."""
-    lanes: list[JobLane] = []
-    for part in raw.split(","):
-        name = part.strip()
-        if not name:
-            continue
-        try:
-            lane = JobLane(name)
-        except ValueError:
-            known = ", ".join(sorted(item.value for item in JobLane))
-            raise SystemExit(f"unknown lane {name!r}. Known: {known}") from None
-        if lane not in lanes:
-            lanes.append(lane)
-    if not lanes:
-        raise SystemExit("--lanes must name at least one lane")
-    return lanes
+class StopTarget(Protocol):
+    """Получатель сигнала остановки очереди либо всего сервиса."""
+
+    def request_stop(self) -> None:
+        """Запросить согласованное завершение процесса."""
+        ...
 
 
-def _install_signal_handlers(worker: Worker) -> None:
+def _install_signal_handlers(worker: StopTarget) -> None:
     """Привязать сигналы остановки к завершению рабочего цикла воркера."""
     loop = asyncio.get_running_loop()
     for sig in (signal.SIGTERM, signal.SIGINT):
@@ -591,20 +584,3 @@ def _install_signal_handlers(worker: Worker) -> None:
             # воркер останавливают иначе, и это не повод не ставить обработчик
             # там, где он работает.
             loop.add_signal_handler(sig, worker.request_stop)
-
-
-def parse_stages(raw: str) -> tuple[JobKind, ...]:
-    """Разобрать `--stages`. Пусто — все этапы.
-
-    Порядок возвращается в порядке `JobKind`, а не в том, как их перечислил
-    оператор: этапы образуют цепочку, и список, читающийся не по ней, путает
-    того, кто смотрит в лог.
-    """
-    names = [part.strip() for part in raw.split(",") if part.strip()]
-    if not names:
-        return tuple(JobKind)
-    unknown = [name for name in names if name not in {kind.value for kind in JobKind}]
-    if unknown:
-        raise ValueError(f"unknown stages: {', '.join(unknown)}")
-    chosen = {JobKind(name) for name in names}
-    return tuple(kind for kind in JobKind if kind in chosen)

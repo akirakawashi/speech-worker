@@ -104,24 +104,3 @@ def pytest_sessionfinish(session: Any, exitstatus: int) -> None:
         for report in reporter.stats.get("skipped", [])
     ):
         session.exitstatus = pytest.ExitCode.TESTS_FAILED
-
-
-@pytest.fixture(autouse=True)
-def blank_external_credentials(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Не дать тестам уйти в сеть с настоящими ключами разработчика.
-
-    `Settings(...)` всегда читает локальный `.env` (pydantic-settings,
-    `env_file`), даже когда тест задаёт другие поля явно. Живой ключ
-    `OPENROUTER_*` или `TRANSCRIPTION_*` увёл бы тесты «распознавание не
-    настроено» к провайдеру.
-
-    `TRANSCRIPTION_ENABLED` намеренно не трогается: её умолчание `None` значит
-    «унаследовать `OPENROUTER_ENABLED`», и закрепление `false` здесь перекрыло бы
-    явные аргументы тестов, которые это наследование проверяют.
-    """
-    monkeypatch.setenv("OPENROUTER_ENABLED", "false")
-    monkeypatch.setenv("OPENROUTER_API_KEY", "")
-    monkeypatch.setenv("TRANSCRIPTION_PROVIDER", "")
-    monkeypatch.setenv("TRANSCRIPTION_BASE_URL", "")
-    monkeypatch.setenv("TRANSCRIPTION_API_KEY", "")
-    monkeypatch.setenv("TRANSCRIPTION_MODEL", "")

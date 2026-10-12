@@ -8,6 +8,7 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from src.application.dto.calls import JobKind, JobLane
+from src.application.dto.quality import CURRENT_SCRIPT
 from src.application.ports.queue import NewJob, ReprocessingConflict
 from src.infrastructure.persistence.settings_store import read_setting
 from src.infrastructure.queue.postgres import PostgresJobQueue
@@ -85,9 +86,12 @@ async def reprocess(
             lane=lane,
             max_attempts=int(attempts[kind.value]),
             lease_seconds=900 if kind is JobKind.TRANSCRIBE else 300,
+            payload={"script_version": CURRENT_SCRIPT.version} if kind is JobKind.EVALUATE else {},
         ),
         retry_job_id=retry_job_id,
     )
+    if kind is JobKind.EVALUATE:
+        return job_id
     params = {"call_id": call_id}
     await session.execute(_RESET_CALL_SQL, params)
     if kind in (JobKind.INGEST, JobKind.TRANSCRIBE):

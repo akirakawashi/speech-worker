@@ -1,22 +1,6 @@
-"""Клиент REST API Naumen Contact Center v2.
+"""REST-клиент NCC: поток записей, справочники сотрудников и проектов.
 
-Три запроса, и это **всё**, что API даёт проекту:
-
-* `GET /callrecord/download?sessionId=` — запись целиком, потоком;
-* `GET /employees` — справочник сотрудников, чтобы у звонка появился оператор;
-* `GET /projects/{uuid}` — название и тип проекта для справочника очередей;
-* `GET /projects/{uuid}/cases-batch/list` — кейсы проекта за диапазон дат.
-
-Последний и есть перечисление звонков, которого прежде считалось, что нет
-([reference/2026-09-09-ncc-api-enumeration-gap.md] — разбор устарел в этой
-части). Кейс несёт `sessionId` (руководство, 4.10.2 «Формат данных анкеты»), а
-по `sessionId` скачивается запись. Цепочка замыкается.
-
-Что нужно знать про диапазон: `modifiedAfter`/`modifiedBefore` фильтруют по
-**последнему изменению** кейса, а не по времени звонка. Для телесейлза это
-почти одно и то же — кейс отрабатывают в день звонка, — но не тождество, и
-источник поэтому сверяет дату создания и говорит, сколько кейсов пришлось на
-другие сутки.
+Список звонков поставляет выбранный источник; API кейсов для этого не подходит.
 """
 
 from __future__ import annotations
@@ -32,10 +16,6 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from src.infrastructure.sources.ncc.source import SESSION_ID_RE, RecordingNotAvailable
 from src.setting.config import Settings
-
-#: Имя цели в реестре адаптеров. Нужно, чтобы взять общий контекст исполнения с
-#: единым дедлайном на весь вызов вместе с повторами.
-NCC_ADAPTER: Final[str] = "speech_ncc"
 
 #: Руководство требует объявлять тип возвращаемых данных заголовком
 #: `Content-Type` — даже у `GET`, где тела запроса нет. Это их правило, а не
@@ -261,48 +241,6 @@ class NccRestClient(BaseModel):
             data_channel=_text(body.get("dataChannel")),
         )
 
-    async def cases(
-        self,
-        project: str,
-        *,
-        since: datetime,
-        until: datetime,
-        page: int = 0,
-    ) -> list[dict[str, Any]]:
-        """Кейсы проекта, изменённые в диапазоне `[since, until)`.
-
-        Страница фиксирована и равна ста (руководство, 4.11 «Работа со
-        списками»); пустой список означает, что страницы кончились. Нумерация
-        здесь с нуля: `page=0` и отсутствие параметра — одно и то же.
-
-        `204 No Content` — законный ответ на пустой список, а не отказ: в
-        проекте могло не быть кейсов за сутки.
-        """
-        identifier = project.strip()
-        if not identifier:
-            raise NccError("cases_project_is_empty", retryable=False)
-        params = {
-            "modifiedAfter": _rfc3339(since),
-            "modifiedBefore": _rfc3339(until),
-        }
-        if page:
-            params["page"] = str(page)
-        body = await self._get_json(f"/projects/{identifier}/cases-batch/list", params)
-        if body is None:
-            return []
-        if isinstance(body, dict):
-            # Форма ответа у постраничных списков — либо массив, либо объект с
-            # элементами. Принимаются обе: различать их по версии API значило бы
-            # зашить догадку о том, какая отвечает.
-            for key in ("objectsOnPage", "items", "callcases", "cases"):
-                found = body.get(key)
-                if isinstance(found, list):
-                    return [row for row in found if isinstance(row, dict)]
-            return []
-        if isinstance(body, list):
-            return [row for row in body if isinstance(row, dict)]
-        raise NccError("cases_malformed", retryable=True)
-
     async def _get_json(self, path: str, params: dict[str, str] | None) -> Any:
         """Выполнить GET к NCC и вернуть JSON либо нормализованный отказ."""
         where = path.strip("/").split("/", 1)[0] or "ncc"
@@ -423,59 +361,6 @@ class NccRestClient(BaseModel):
                     yield chunk
             finally:
                 await response.aclose()
-
-
-def _rfc3339(moment: datetime) -> str:
-    """Время в том виде, в каком его ждёт NCC.
-
-    С разделителем `T`, со смещением и **без** микросекунд: руководство
-    перечисляет допустимые формы, и ни в одной их нет. Смещение обязательно —
-    без него сервер трактует время по-своему, и сутки съезжают.
-    """
-    return moment.replace(microsecond=0).isoformat()
-
-
-#: Ключи, под которыми в ответах NCC встречается идентификатор сессии.
-#:
-#: Их два, потому что руководство показывает оба: `sessionId` в структуре
-#: данных анкеты и в ответе на её заполнение. Регистр приводится, чтобы
-#: `sessionID` из другой версии не прошёл мимо.
-_SESSION_KEYS: Final[frozenset[str]] = frozenset({"sessionid", "session_id"})
-
-
-def session_ids_in(value: Any, *, depth: int = 0) -> list[str]:
-    """Все идентификаторы сессий, найденные в объекте кейса.
-
-    Поиск по вложенности, а не по фиксированному пути: руководство показывает
-    `sessionId` внутри данных анкеты, а какой именно формой он придёт в списке
-    кейсов конкретной установки, проверить до появления доступа к проекту
-    нельзя. Фиксированный путь в этом случае — догадка, которая молча вернёт
-    пусто; поиск находит его там, где он есть, и честно не находит, если его
-    нет вовсе.
-
-    Глубина ограничена: ответ приходит снаружи, и рекурсия по чужим данным без
-    предела — способ уронить воркер чужим ответом.
-    """
-    if depth > 6:
-        return []
-    found: list[str] = []
-    if isinstance(value, dict):
-        for key, item in value.items():
-            if isinstance(key, str) and key.lower() in _SESSION_KEYS:
-                text_value = _text(item)
-                if text_value:
-                    found.append(text_value)
-                elif isinstance(item, dict):
-                    # `{"value": "..."}` — форма v1.
-                    nested = _text(item.get("value"))
-                    if nested:
-                        found.append(nested)
-            else:
-                found.extend(session_ids_in(item, depth=depth + 1))
-    elif isinstance(value, list):
-        for item in value:
-            found.extend(session_ids_in(item, depth=depth + 1))
-    return found
 
 
 def _text(value: Any) -> str | None:

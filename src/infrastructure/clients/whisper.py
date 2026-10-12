@@ -1,21 +1,4 @@
-"""Клиент Whisper для конвейера.
-
-Транспорт берётся у основного приложения (`app/transcription`), а не пишется
-заново: multipart-запрос, заголовок авторизации, повторы с бюджетом времени и
-дисциплина «в ошибку не попадает тело ответа провайдера» (BR-13) там уже
-решены и проверены.
-
-Своё здесь только две вещи:
-
-* **настройки.** Конвейер и чат могут использовать разные серверы и модели.
-    Конвейеру нужен настоящий Whisper на icai2. Общая пара
-  настроек означала бы, что выключить одно нельзя, не выключив другое.
-* **`verbose_json`.** Конвейеру нужны реплики с таймкодами, а не сплошной
-  текст: на них строится и поиск с цитатами, и определение ролей по каналам.
-
-Замер SP-003: скорость 13,2× реального времени (RTF ≈ 0,076), сегменты приходят с
-`start`/`end` и признаками качества.
-"""
+"""HTTP-клиент Whisper: WAV на входе, текст и сегменты на выходе."""
 
 from __future__ import annotations
 
@@ -35,13 +18,11 @@ from src.application.errors.external import (
     WhisperNotConfigured as WhisperNotConfigured,
 )
 from src.infrastructure.http.execution import AdapterExecution
+from src.infrastructure.transcription.execution import resolve_transcription_execution_policy
 from src.infrastructure.transcription.providers import OpenAICompatibleAudioProvider
-from src.infrastructure.transcription.service import resolve_transcription_execution_policy
 from src.setting.config import Settings
 from src.setting.transcription import TranscriptionConfig
 
-#: Даунмикс пишется в WAV: он уже подготовлен `ffmpeg`, и перекодировать его в
-#: сжатый формат ради передачи значит потерять то, ради чего готовили.
 AUDIO_MIME: Final[str] = "audio/wav"
 AUDIO_FORMAT: Final[str] = "wav"
 
@@ -76,12 +57,6 @@ class SpeechTranscriptionClient(BaseModel):
             async with execution, httpx.AsyncClient() as client:
                 return await provider.transcribe(request, execution=execution, client=client)
         except TimeoutError as exc:
-            # Общий срок вызова срабатывает при выходе из `execution`, то есть
-            # уже снаружи провайдера, и его перевод в класс туда не дотягивается:
-            # наружу шёл голый `TimeoutError`, и воркер писал `unexpected_error`.
-            # Основное приложение переводит его так же (`transcribe_audio`).
-            # Отмену снаружи это не задевает: истёкшим сроком `asyncio.timeout`
-            # называет только собственный, остальная отмена выходит как есть.
             raise TranscriptionError("timeout") from exc
 
 
@@ -109,13 +84,8 @@ def build_whisper_client(settings: Settings) -> SpeechTranscriptionClient:
             api_key=str(getattr(settings, "speech_whisper_api_key", "") or ""),
             model=str(getattr(settings, "speech_whisper_model", "") or "large-v3"),
             timeout_seconds=float(getattr(settings, "speech_whisper_timeout_seconds", 600.0)),
-            # Окно не задано: у сервера на icai2 ограничения длительности нет,
-            # и объявив его, мы получили бы «подозрение на обрезку» на каждой
-            # длинной записи — предупреждение, за которым ничего не стоит.
             audio_window_seconds=None,
             response_format="verbose_json",
-            source="transcription",
-            base_url_setting="SPEECH_WHISPER_BASE_URL",
             extra_options=extra,
         ),
         language=str(getattr(settings, "speech_whisper_language", "") or "ru"),

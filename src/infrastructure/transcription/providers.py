@@ -1,14 +1,6 @@
-"""Concrete transcription transports.
-
-Both providers speak the same domain contract; only the wire format differs.
-Neither one decides which audio formats are acceptable -- that decision was
-already made by `read_and_validate_audio` before a `TranscriptionRequest`
-exists.
-"""
+"""Multipart-транспорт Whisper и разбор verbose_json."""
 
 from __future__ import annotations
-
-import base64
 
 from src.application.dto.transcription import (
     TranscriptionError,
@@ -21,55 +13,6 @@ from src.infrastructure.transcription.http import (
     HttpTranscriptionProvider,
     TranscriptionHttpRequest,
 )
-
-
-class OpenRouterAudioProvider(HttpTranscriptionProvider):
-    """JSON + base64 transport, matching OpenRouter's audio input contract."""
-
-    kind: TranscriptionProviderKind = "openrouter"
-
-    def build_http_request(self, request: TranscriptionRequest) -> TranscriptionHttpRequest:
-        """Преобразовать DTO распознавания в технический HTTP-запрос провайдера."""
-        body: dict[str, object] = {
-            "model": self.model,
-            "input_audio": {
-                "data": base64.b64encode(request.content).decode("ascii"),
-                "format": request.audio_format,
-            },
-        }
-        if request.language:
-            body["language"] = request.language
-
-        return TranscriptionHttpRequest(
-            url=f"{self.config.base_url}/audio/transcriptions",
-            headers=self.auth_headers(),
-            json_body=body,
-        )
-
-    def parse_payload(
-        self,
-        payload: object,
-        request: TranscriptionRequest,
-    ) -> TranscriptionResult:
-        """Преобразовать ответ провайдера в DTO результата распознавания."""
-        if not isinstance(payload, dict):
-            raise TranscriptionError("provider_error", detail_code="malformed_response")
-
-        text = payload.get("text") or payload.get("transcript")
-        if not isinstance(text, str) or not text.strip():
-            raise TranscriptionError("provider_error", detail_code="empty_transcript")
-
-        language = payload.get("language")
-        confidence = payload.get("confidence")
-
-        return TranscriptionResult(
-            text=text.strip(),
-            provider_kind=self.kind,
-            model=self.model,
-            language=str(language) if language is not None else request.language,
-            confidence=float(confidence) if isinstance(confidence, (int, float)) else None,
-            truncation_check=self.evaluate_truncation(None),
-        )
 
 
 class OpenAICompatibleAudioProvider(HttpTranscriptionProvider):

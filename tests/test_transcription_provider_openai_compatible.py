@@ -18,8 +18,6 @@ def make_config(**overrides: object) -> TranscriptionConfig:
         "timeout_seconds": 60.0,
         "audio_window_seconds": 30.0,
         "response_format": "verbose_json",
-        "source": "transcription",
-        "base_url_setting": "transcription_base_url",
     }
     payload.update(overrides)
     return TranscriptionConfig(**payload)  # type: ignore[arg-type]

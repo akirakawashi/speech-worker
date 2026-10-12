@@ -1,15 +1,8 @@
-"""Клиент языковой модели для оценки звонка по скрипту.
+"""HTTP-транспорт готовых запросов оценки.
 
-Запрос идёт прямо в совместимый `/chat/completions` сервер модели.
-Промпт и скрипт оценки версионируются в коде вместе с разбором ответа;
-оценку можно проверить локально на любой совместимой модели.
-
-`chat_template_kwargs` не отправляется. Быстрый путь выключает рассуждение
-умолчанием сервера, а поле в запросе это умолчание перебивает (ADR-0011 §1):
-включать рассуждение оценке незачем, а перебить умолчание случайно — легко.
-
-Настройки свои (`SPEECH_QUALITY_LLM_*`), а не `LLM_*` основного бэкенда: иначе
-нельзя было бы отключить оценку звонков, не отключив чат.
+Промпты, модель и лимит ответа задаёт бэкенд. Воркер хранит адрес, ключ
+и таймаут сервера и передаёт полученные сообщения в /chat/completions.
+Параметры chat_template_kwargs не отправляются; режим рассуждения задаёт сервер.
 """
 
 from __future__ import annotations
@@ -20,6 +13,7 @@ from typing import Any
 import httpx
 from pydantic import BaseModel, ConfigDict, Field
 
+from src.application.dto.quality_execution import QualityModelRequest
 from src.application.errors.quality import (
     QualityModelError as QualityModelError,
     QualityModelNotConfigured as QualityModelNotConfigured,
@@ -93,7 +87,7 @@ def _content(body: Any) -> str:
 
 
 def build_quality_client(settings: Settings) -> QualityModelClient:
-    """Собрать клиент по настройкам `SPEECH_QUALITY_LLM_*`.
+    """Собрать транспорт по адресу, ключу и таймауту; параметры запроса даст бэкенд.
 
     Отказ при пустом адресе, а не молчаливое отключение: команда, тихо решившая,
     что оценивать нечем, отчиталась бы о пустом периоде, и выглядело бы это как
@@ -107,10 +101,10 @@ def build_quality_client(settings: Settings) -> QualityModelClient:
         )
     return QualityModelClient(
         base_url=base_url.rstrip("/"),
-        model=str(getattr(settings, "speech_quality_llm_model", "") or "qwen3.8-27b-fast"),
+        model="prepared-by-backend",
         api_key=str(getattr(settings, "speech_quality_llm_api_key", "") or ""),
         timeout_seconds=float(getattr(settings, "speech_quality_llm_timeout_seconds", 180.0)),
-        max_tokens=int(getattr(settings, "speech_quality_llm_max_tokens", 4096)),
+        max_tokens=4096,
     )
 
 
@@ -120,3 +114,18 @@ __all__ = [
     "QualityModelNotConfigured",
     "build_quality_client",
 ]
+
+
+class PreparedQualityModelClient:
+    """Исполнить выданные бэкендом сообщения и параметры через существующий HTTP-транспорт."""
+
+    def __init__(self, client: QualityModelClient) -> None:
+        """Принять адрес, ключ и таймаут; имя модели и лимит берём из каждого DTO."""
+        self._client = client
+
+    async def complete(self, request: QualityModelRequest) -> str:
+        """Выполнить один запрос и вернуть текст ответа без собственного промпта."""
+        client = self._client.model_copy(
+            update={"model": request.model, "max_tokens": request.max_tokens}
+        )
+        return await client.complete([message.model_dump() for message in request.messages])

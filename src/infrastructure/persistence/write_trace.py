@@ -25,8 +25,6 @@ from sqlalchemy.engine import Engine
 
 logger = logging.getLogger("src.infrastructure.persistence.write_trace")
 
-WRITE_TRACE_LOGGER_NAME = "src.infrastructure.persistence.write_trace"
-
 # `insert into "messages" (...)`, `update agents set ...`, `delete from users`.
 # Quoted and schema-qualified names both appear; only the final identifier is
 # kept, since that is the table.

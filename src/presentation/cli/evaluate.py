@@ -8,7 +8,7 @@ from collections.abc import Sequence
 from datetime import date
 
 from src.application.dto.quality_batch import RunEvaluation
-from src.application.errors.quality import QualityModelError, QualityModelNotConfigured
+from src.application.pipeline.stages import StageError
 from src.application.quality.batch import validate_selection
 
 
@@ -43,7 +43,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument(
         "--apply",
         action="store_true",
-        help="вызвать модель и записать оценки; без него показывается только счёт",
+        help="поставить оценку в очередь; без него показывается только счёт",
     )
     args = parser.parse_args(argv)
     from src.di.evaluation import build_evaluation
@@ -62,15 +62,10 @@ def main(argv: Sequence[str] | None = None) -> int:
         )
         validate_selection(query)
         result = asyncio.run(build_evaluation().run(query, on_line=print))
-    except (ValueError, LookupError, QualityModelNotConfigured) as exc:
+    except (ValueError, LookupError, RuntimeError) as exc:
         raise SystemExit(str(exc)) from exc
-    except QualityModelError as exc:
-        raise SystemExit(
-            "the model refused the request ("
-            f"{exc.reason}"
-            "): check SPEECH_QUALITY_LLM_BASE_URL, SPEECH_QUALITY_LLM_MODEL "
-            "and the key"
-        ) from exc
+    except StageError as exc:
+        raise SystemExit(f"backend request failed: {exc.error_class.value}") from None
     if result.stale is not None:
         print(
             f"оценок, разошедшихся с расшифровкой: {result.stale}"
@@ -78,10 +73,10 @@ def main(argv: Sequence[str] | None = None) -> int:
         )
         if not args.apply:
             print("это была проверка; чтобы удалить, добавьте --apply")
-    elif result.report is not None:
-        print(result.report.describe())
+    else:
+        print(f"звонков к оценке: {result.candidates}; поставлено в очередь: {result.enqueued}")
         if not args.apply:
-            print("это была проверка; чтобы оценить, добавьте --apply")
+            print("это была проверка; чтобы поставить задания, добавьте --apply")
     return 0
 
 

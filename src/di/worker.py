@@ -5,8 +5,11 @@ from __future__ import annotations
 import asyncio
 
 from src.application.dto.calls import JobKind
+from src.application.dto.maintenance import MaintenanceAction
 from src.application.dto.worker import WorkerOptions
 from src.di.analysis import build_analysis_client
+from src.di.evaluation import build_queue_evaluation
+from src.di.maintenance import build_maintenance
 from src.di.pipeline import build_registry, build_stage_deps
 from src.di.sources import build_worker_source
 from src.infrastructure.clients.whisper import build_whisper_client
@@ -19,6 +22,7 @@ from src.infrastructure.persistence.session import (
 from src.infrastructure.queue.postgres import PostgresJobQueue
 from src.infrastructure.queue.worker import Worker, _install_signal_handlers
 from src.infrastructure.runtime.logs import configure_logging
+from src.infrastructure.runtime.service import WorkerService
 from src.infrastructure.storage.recordings import build_storage
 from src.setting.config import Settings, get_settings
 
@@ -48,6 +52,7 @@ async def _run_worker(options: WorkerOptions, settings: Settings) -> None:
             else None,
             transcription=build_whisper_client(settings) if JobKind.TRANSCRIBE in stages else None,
             analysis=build_analysis_client(settings) if JobKind.ANALYZE in stages else None,
+            evaluation=build_queue_evaluation(settings) if JobKind.EVALUATE in stages else None,
         )
         async with sessionmaker() as session:
             if not await speech_schema_is_ready(session):
@@ -62,16 +67,30 @@ async def _run_worker(options: WorkerOptions, settings: Settings) -> None:
             resources,
             lanes=options.lanes,
         )
-        _install_signal_handlers(worker)
         print(
             f"speech worker {worker.worker_id} "
             f"lanes={','.join(lane.value for lane in options.lanes)} "
             f"stages={','.join(kind.value for kind in options.stages)}"
         )
         if options.once:
+            _install_signal_handlers(worker)
             await worker.run_once()
         else:
-            await worker.run_forever()
+            actions: list[MaintenanceAction] = []
+            if not options.queue_only:
+                if JobKind.INGEST in stages:
+                    actions.extend(source.value for source in options.sources)
+                if JobKind.EVALUATE in stages:
+                    actions.append("quality")
+            if actions:
+                service = WorkerService(
+                    worker, build_maintenance(settings, sessionmaker, queue), actions
+                )
+                _install_signal_handlers(service)
+                await service.run_forever()
+            else:
+                _install_signal_handlers(worker)
+                await worker.run_forever()
     finally:
         await engine.dispose()
 

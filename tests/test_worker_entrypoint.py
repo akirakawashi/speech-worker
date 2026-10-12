@@ -115,3 +115,25 @@ async def test_long_running_worker_disposes_pool_when_loop_finishes(runtime) -> 
     runtime.worker.run_forever.assert_awaited_once()
     runtime.worker.run_once.assert_not_awaited()
     runtime.engine.dispose.assert_awaited_once()
+
+
+async def test_evaluation_once_needs_no_audio_or_scheduled_intake(runtime, monkeypatch) -> None:
+    """Одно задание оценки не запускает приём и не требует аудиосервисов."""
+    maintenance = Mock(side_effect=AssertionError("once must not start collectors"))
+    monkeypatch.setattr(module, "build_maintenance", maintenance)
+    settings = runtime.settings.model_copy(
+        update={"speech_quality_llm_base_url": "http://quality.invalid/v1"}
+    )
+    await module._run_worker(WorkerOptions(stages=(JobKind.EVALUATE,), once=True), settings)
+    resources = runtime.factory.call_args.args[2]
+    assert resources.evaluation is not None
+    assert (
+        resources.fetcher
+        is resources.storage
+        is resources.transcription
+        is resources.analysis
+        is None
+    )
+    maintenance.assert_not_called()
+    runtime.worker.run_once.assert_awaited_once()
+    runtime.engine.dispose.assert_awaited_once()

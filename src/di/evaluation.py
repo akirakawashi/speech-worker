@@ -1,17 +1,19 @@
-"""Сборка пакетной оценки из PostgreSQL и клиента выбранной модели."""
+"""Сборка постановки оценки в очередь и исполнения готовых модельных шагов."""
 
-from src.application.quality.batch import EvaluationService
-from src.infrastructure.clients.quality import build_quality_client
-from src.infrastructure.persistence.evaluation import PostgresEvaluationRepository
-from src.infrastructure.persistence.session import get_speech_ms_sessionmaker
-from src.setting.config import get_settings
+from src.application.quality.execution import QualityExecutionService
+from src.application.quality.queue_command import QueuedEvaluationService
+from src.di.maintenance import build_worker_control
+from src.infrastructure.clients.quality import PreparedQualityModelClient, build_quality_client
+from src.setting.config import Settings, get_settings
 
 
-def build_evaluation() -> EvaluationService:
-    """Прочитать настройки при запуске, собрать хранение и отложенную модель оценки."""
-    settings = get_settings()
-    return EvaluationService(
-        PostgresEvaluationRepository(get_speech_ms_sessionmaker(settings)),
-        lambda: build_quality_client(settings),
-        timezone=settings.speech_display_timezone,
+def build_evaluation() -> QueuedEvaluationService:
+    """Собрать ручную команду, которая ставит задания через API бэкенда."""
+    return QueuedEvaluationService(build_worker_control(get_settings()))
+
+
+def build_queue_evaluation(settings: Settings) -> QualityExecutionService:
+    """Внедрить подготовку бэкендом и HTTP-вызов модели без локальных промптов."""
+    return QualityExecutionService(
+        build_worker_control(settings), PreparedQualityModelClient(build_quality_client(settings))
     )

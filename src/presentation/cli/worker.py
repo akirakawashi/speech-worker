@@ -11,14 +11,24 @@ from src.application.dto.worker import WorkerOptions
 def build_parser() -> argparse.ArgumentParser:
     """Описать флаги команды; создание парсера не открывает внешние ресурсы."""
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--lanes", default="daily", help="полосы через запятую: daily,backfill")
+    parser.add_argument(
+        "--lanes", default="daily,backfill", help="полосы через запятую: daily,backfill"
+    )
+    parser.add_argument(
+        "--queue-only",
+        action="store_true",
+        help="только очередь, без автоматического приёма и постановки оценки",
+    )
+    parser.add_argument(
+        "--sources", default="ncc,telphin", help="источники автоматического приёма: ncc,telphin"
+    )
     parser.add_argument("--once", action="store_true", help="обработать одно задание и выйти")
     parser.add_argument(
         "--stages",
         default="",
         help=(
-            "этапы через запятую: ingest,transcribe,analyze. "
-            "Пусто — все три. Ограничение нужно, когда этап заведомо "
+            "этапы через запятую: ingest,transcribe,analyze,evaluate. "
+            "Пусто — все четыре. Ограничение нужно, когда этап заведомо "
             "невозможен: например, приложение LLM ещё не создано"
         ),
     )

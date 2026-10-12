@@ -15,7 +15,7 @@ from src.infrastructure.persistence.write_trace import install_write_trace
 from src.setting.config import Settings
 
 # Схема общая с speech-backend; воркер проверяет её и не запускает миграции.
-SPEECH_REQUIRED_SCHEMA_REVISION: str = "sp_0015_drop_masking"
+SPEECH_REQUIRED_SCHEMA_REVISION: str = "sp_0016_evaluation_jobs"
 _SPEECH_REQUIRED_TABLES = (
     "speech_calls",
     "speech_call_reasons",
@@ -56,21 +56,6 @@ async def speech_schema_is_ready(session: AsyncSession) -> bool:
         return bool(result)
     except Exception:
         return False
-
-
-def _pool_kwargs(settings: Settings) -> dict[str, object]:
-    """The connection budget the engine of this process is held to.
-
-    Declared rather than defaulted: the library default is 15 per engine, and
-    the cluster is shared.
-    """
-    return {
-        "pool_pre_ping": True,
-        "pool_size": settings.db_pool_size,
-        "max_overflow": settings.db_max_overflow,
-        "pool_timeout": settings.db_pool_timeout_seconds,
-        "pool_recycle": settings.db_pool_recycle_seconds,
-    }
 
 
 @lru_cache(maxsize=8)

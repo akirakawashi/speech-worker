@@ -59,7 +59,6 @@ def test_error_defaults_have_no_provider_detail() -> None:
 
     assert exc.status_code is None
     assert exc.detail_code is None
-    assert exc.outcome is None
 
 
 def test_request_repr_hides_audio_bytes() -> None:
@@ -85,7 +84,7 @@ def test_result_repr_hides_transcript_text() -> None:
 def test_result_defaults_are_conservative() -> None:
     result = TranscriptionResult(
         text="ok",
-        provider_kind="openrouter",
+        provider_kind="openai_compatible",
         model="openai/whisper-large-v3",
     )
 

@@ -16,6 +16,7 @@ from src.application.dto.quality_batch import (
     CandidateSelection,
     LineSnapshot,
 )
+from src.application.dto.quality_execution import QualityTotals
 from src.application.quality.evaluation import (
     Evaluation,
     QualityError,
@@ -237,6 +238,7 @@ async def store_evaluation(
     *,
     evaluated_at: datetime,
     source_lines: Sequence[TranscriptLine],
+    totals: QualityTotals | None = None,
 ) -> None:
     """Атомарно записать оценку в текущей транзакции после проверки её исходных данных."""
     role_method = await _check_input(session, call_id, source_lines, evaluated_at)
@@ -248,10 +250,10 @@ async def store_evaluation(
             "script_version": evaluation.script_version,
             "model_name": evaluation.model_name,
             "script_applies": evaluation.script_applies,
-            "score": evaluation.score,
-            "passed_count": evaluation.passed_count,
-            "stage_count": evaluation.stage_count,
-            "all_passed": evaluation.all_passed,
+            "score": totals.score if totals is not None else evaluation.score,
+            "passed_count": totals.passed_count if totals is not None else evaluation.passed_count,
+            "stage_count": totals.stage_count if totals is not None else evaluation.stage_count,
+            "all_passed": totals.all_passed if totals is not None else evaluation.all_passed,
             "outcome": evaluation.outcome,
             "stages": json.dumps([stage.as_json() for stage in evaluation.stages]),
             "objections": json.dumps([item.as_json() for item in evaluation.objections]),
@@ -288,25 +290,49 @@ async def _store_failure(
             await _check_input(session, call_id, lines, read_at)
         except QualityError:
             return
-        await session.execute(
-            _STORE_FAILURE_SQL,
-            {
-                "call_id": call_id,
-                "script_version": script.version,
-                "model_name": model_name,
-                "script_applies": None,
-                "score": None,
-                "passed_count": None,
-                "stage_count": None,
-                "all_passed": None,
-                "outcome": None,
-                "stages": "[]",
-                "objections": "[]",
-                "summary": None,
-                "evaluated_at": read_at,
-                "failure_reason": reason,
-            },
+        await store_failure_result(
+            session,
+            call_id,
+            evaluated_at=read_at,
+            model_name=model_name,
+            script_version=script.version,
+            reason=reason,
         )
+
+
+async def store_failure_result(
+    session: AsyncSession,
+    call_id: uuid.UUID,
+    *,
+    evaluated_at: datetime,
+    model_name: str,
+    script_version: str,
+    reason: str,
+) -> None:
+    """Записать проверенный отказ в транзакции вызывающего, сохранив свежую успешную оценку.
+
+    Вызывающий сначала блокирует и проверяет исходные реплики. Текст разговора
+    и ответа модели в причину не включаются; коммит принадлежит вызывающему.
+    """
+    await session.execute(
+        _STORE_FAILURE_SQL,
+        {
+            "call_id": call_id,
+            "script_version": script_version,
+            "model_name": model_name,
+            "script_applies": None,
+            "score": None,
+            "passed_count": None,
+            "stage_count": None,
+            "all_passed": None,
+            "outcome": None,
+            "stages": "[]",
+            "objections": "[]",
+            "summary": None,
+            "evaluated_at": evaluated_at,
+            "failure_reason": reason,
+        },
+    )
 
 
 async def drop_stale(sessionmaker: async_sessionmaker[AsyncSession], *, apply: bool) -> int:

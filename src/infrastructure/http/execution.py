@@ -1,11 +1,6 @@
-"""Контекст исполнения внешнего вызова: общий дедлайн, повторы, телеметрия.
+"""Дедлайн, повторы и телеметрия внешнего HTTP-вызова.
 
-Перенесён из `src/infrastructure/http/execution.py` монорепозитория. Убраны две функции,
-строившие политику по записи реестра корпоративных адаптеров
-(`resolve_adapter_execution_policy`, `adapter_execution`): речь ими не
-пользовалась, политику для распознавания собирает
-`resolve_transcription_execution_policy` (`src/infrastructure/transcription/service.py`).
-Остальное без правок.
+Политика Whisper собирается в infrastructure/transcription/execution.py.
 """
 
 from __future__ import annotations

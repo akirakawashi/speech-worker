@@ -277,6 +277,7 @@ class JobKind(StrEnum):
     INGEST = "ingest"
     TRANSCRIBE = "transcribe"
     ANALYZE = "analyze"
+    EVALUATE = "evaluate"
 
 
 #: Следующий этап за каждым. Конец цепочки — `None`.
@@ -284,6 +285,7 @@ SPEECH_NEXT_JOB_KIND: Final[dict[JobKind, JobKind | None]] = {
     JobKind.INGEST: JobKind.TRANSCRIBE,
     JobKind.TRANSCRIBE: JobKind.ANALYZE,
     JobKind.ANALYZE: None,
+    JobKind.EVALUATE: None,
 }
 
 
@@ -343,7 +345,7 @@ SPEECH_NON_RETRYABLE_ERRORS: Final[frozenset[JobErrorClass]] = frozenset(
 #: это «исчез объект аудио или транскрипт» — того, что этап читает, больше нет,
 #: и никакой повтор его не вернёт; нужна переобработка с более раннего этапа.
 SPEECH_NOT_FOUND_TERMINAL_KINDS: Final[frozenset[JobKind]] = frozenset(
-    {JobKind.TRANSCRIBE, JobKind.ANALYZE}
+    {JobKind.TRANSCRIBE, JobKind.ANALYZE, JobKind.EVALUATE}
 )
 
 
@@ -433,5 +435,6 @@ SPEECH_DEFAULT_SETTINGS: Final[dict[str, object]] = {
         JobKind.INGEST.value: 6,
         JobKind.TRANSCRIBE.value: 3,
         JobKind.ANALYZE.value: 3,
+        JobKind.EVALUATE.value: 3,
     },
 }

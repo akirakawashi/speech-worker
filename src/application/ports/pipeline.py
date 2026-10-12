@@ -9,6 +9,7 @@ from src.application.dto.pipeline_input import (
     CallForIngest,
     CallForTranscription,
 )
+from src.application.dto.quality_execution import QualityWork
 from src.application.ports.queue import ClaimedJob
 
 
@@ -42,4 +43,8 @@ class StagePersistence(Protocol):
 
     async def save_analysis(self, job: ClaimedJob, work: AnalyzeWork) -> None:
         """Сохранить разбор и снять оценку при изменении ролей."""
+        ...
+
+    async def save_evaluation(self, job: ClaimedJob, work: QualityWork) -> None:
+        """Сохранить оценку по неизменному входу без завершения транзакции."""
         ...

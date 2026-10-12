@@ -1,24 +1,7 @@
-"""Откуда берётся суточный пакет звонков.
+"""Получение списка звонков NCC и чтение аудио выбранного источника.
 
-Перечисления звонков в реальном времени у NCC нет: REST API отдаёт запись
-только по уже известному идентификатору сессии, а списка звонков в нём нет
-вовсе — проверены все 194 эндпойнта руководства. Поэтому сбор суточный
-(решение S-19), а **способ доставки пакета скрыт за портом**: он уже менялся
-один раз и, судя по всему, поменяется ещё, когда появится доступ к объектному
-хранилищу.
-
-Порт умеет две вещи — перечислить звонки за дату и отдать байты одного
-аудиофайла. Вторая здесь, а не в отдельном клиенте, потому что источник знает,
-как достать своё: локальная выгрузка читает файл с диска, хранилище пойдёт в
-S3, REST — за `sessionId`. Разделив эти две операции по разным модулям, мы бы
-получили пары «этот список сочетается с этим скачивателем», которые нигде не
-записаны.
-
-Реализации:
-
-* `LocalExportSource` — каталог с выгрузкой, полученной от колл-центра. Работает
-  сейчас и на настоящих записях.
-* хранилище объектов и REST — когда появится доступ.
+Фабрика поддерживает локальную выгрузку, обход сессий и reporting-представления.
+Режим кейсов rest отклоняется: API кейсов не отдаёт список сессий.
 """
 
 from __future__ import annotations
@@ -27,10 +10,9 @@ import logging
 import re
 import urllib.parse
 from collections.abc import AsyncIterator, Iterable, Sequence
-from datetime import date, datetime, time, timedelta
+from datetime import date
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Final
-from zoneinfo import ZoneInfo
+from typing import TYPE_CHECKING, Final
 
 from src.application.dto.sources import (
     CallRef as CallRef,
@@ -46,9 +28,6 @@ from src.infrastructure.persistence.classifier import PATH_SEPARATOR, classifier
 logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:  # pragma: no cover - только для типов, цикла импорта нет
-    # `rest` импортирует этот модуль, поэтому во время выполнения импорт назад
-    # замкнул бы круг. Под проверкой типов круга нет.
-    from src.infrastructure.sources.ncc.rest import NccRestClient
     from src.setting.config import Settings
 
 #: Известные виды источников. `storage` не реализован, `rest` опровергнут; оба
@@ -223,169 +202,6 @@ class LocalExportSource:
         return _stream()
 
 
-class RestCasesSource:
-    """ОПРОВЕРГНУТ 2026-09-14. Оставлен как запись проверенной гипотезы.
-
-    Замысел был: кейсы проекта за диапазон дат → `sessionId` в кейсе → запись.
-    Основание — руководство, 4.10.2 «Формат данных анкеты», где `sessionId`
-    в структуре есть.
-
-    **Вывод оказался неверным.** Та структура описывает анкету, которую пишет
-    `POST /project/{id}/interaction/{sessionId}`, и `sessionId` в ней — из URI
-    запроса, а не то, что отдаёт API кейсов. Проверено на живых данных:
-
-    * 100 настоящих кейсов из открытого проекта — полей ровно четырнадцать
-      (`uuid`, `id`, `title`, `project`, `state`, `operator`, `phoneNumbers`,
-      `invalidPhoneNumbers`, `priority`, `timeZone`, `creationDate`,
-      `completionDate`, `lastModified`, `customForm`), идентификатора сессии
-      среди них нет;
-    * полная карточка `GET /cases/{uuid}` — те же четырнадцать полей;
-    * поиск **по образцу** `node…_domain…_nauss…` по всему ответу — ноль
-      совпадений на 100 кейсах, то есть его нет и под другим именем;
-    * `customForm.default` несёт поля кампании MNP (`AP_bez_skidki`,
-      `Prichina_uhoda`, `Rezultat_kontakta`…) — данные обзвона, не сессии.
-
-    Вдобавок права: из двадцати проектов читаются пять, и все исходящие.
-    Каждый входящий проект отвечает `403`, а речевой аналитике нужны именно
-    входящие.
-
-    Класс не удалён намеренно: разбор ответа и поиск идентификатора проверены
-    тестами и пригодятся, если поставщик сделает обещанное представление со
-    списком сессий. Но собрать источник этим способом нельзя — фабрика
-    отказывает явно, а не возвращает молча пустые сутки.
-
-    Прежнее описание замысла:
-
-    Звонки за сутки — из кейсов проектов NCC.
-
-    Цепочка целиком: кейсы проекта за диапазон дат → `sessionId` в кейсе →
-    запись по `sessionId`. Перечисления звонков как такового в API нет, и это
-    ближайшее к нему: в телесейлзе кейс и есть звонок.
-
-    Проекты задаются настройкой, а не выясняются: перечисления проектов в API
-    не существует ни в v1, ни в v2 — проверено на живой площадке, все
-    идентификаторы, которые отдают `/employees` и `/ous`, принадлежат
-    сотрудникам и оргединицам. UUID проекта берётся из адресной строки консоли
-    (руководство, 6.1).
-    """
-
-    name = "ncc_rest"
-
-    #: Сколько страниц готовы пролистать за одни сутки.
-    #:
-    #: Страница фиксирована и равна ста, полторы тысячи звонков в день — это
-    #: пятнадцать страниц. Пятьдесят оставляют запас на порядок и одновременно
-    #: не дают зациклиться, если сервер однажды начнёт отдавать непустую
-    #: страницу бесконечно: такой цикл не виден ничем, кроме растущего времени
-    #: прогона.
-    MAX_PAGES = 50
-
-    def __init__(self, client: NccRestClient, projects: Sequence[str], *, timezone: str) -> None:
-        """Настроить RestCasesSource из переданных параметров и зависимостей."""
-        if not projects:
-            raise RuntimeError(
-                "SPEECH_NCC_SOURCE_KIND=rest requires SPEECH_NCC_PROJECTS — "
-                "UUID проектов через запятую. Взять их можно только из адресной "
-                "строки консоли NCC: перечисления проектов в API нет."
-            )
-        self._client = client
-        self._projects = tuple(projects)
-        self._tz = ZoneInfo(timezone)
-
-    async def list_calls(self, day: date) -> Sequence[CallRef]:
-        """Звонки за сутки во всех объявленных проектах.
-
-        Границы суток берутся в часовом поясе колл-центра, а не в UTC: «за
-        вчера» для человека — это его вчера, и в UTC сутки съезжают на три часа,
-        то есть три часа вечерних звонков уезжают в соседний день.
-        """
-        start = datetime.combine(day, time.min, tzinfo=self._tz)
-        end = start + timedelta(days=1)
-
-        refs: dict[str, CallRef] = {}
-        foreign_days = 0
-        for project in self._projects:
-            for page in range(self.MAX_PAGES):
-                rows = await self._client.cases(project, since=start, until=end, page=page)
-                if not rows:
-                    break
-                for row in rows:
-                    for session_id in _session_ids_in(row):
-                        if not SESSION_ID_RE.match(session_id):
-                            continue
-                        created = _case_moment(row, self._tz)
-                        if created is not None and created.date() != day:
-                            # Диапазон фильтрует по последнему изменению кейса,
-                            # а не по времени звонка. Расхождение возможно, и
-                            # молчать о нём нельзя: по нему видно, годится ли
-                            # этот фильтр для суточного приёма вообще.
-                            foreign_days += 1
-                            continue
-                        refs[session_id] = CallRef(
-                            session_id=session_id,
-                            # Локатор и есть идентификатор: скачивание идёт по
-                            # нему, отдельного адреса у записи нет.
-                            audio_locator=session_id,
-                            day=day,
-                            started_at=created,
-                            operator_login=_text(row.get("operator")),
-                            project_hint=project,
-                        )
-        if foreign_days:
-            logger.info(
-                "ncc rest: %s кейсов за %s изменены в эти сутки, но созданы в другие",
-                foreign_days,
-                day.isoformat(),
-            )
-        return tuple(refs.values())
-
-    async def open_audio(self, ref: CallRef) -> AsyncIterator[bytes]:
-        """Запись по идентификатору сессии.
-
-        `RecordingNotAvailable` приходит из клиента и наружу проходит как есть:
-        отличать «записи нет» от «источник сломан» — обязанность этапа, и
-        подменять здесь одно другим нельзя.
-        """
-        # Возвращается итератор, а не генератор: порт объявляет `open_audio`
-        # корутиной, отдающей поток. Асинхронный генератор здесь выглядел бы
-        # так же в вызове и не совпал бы с типом — та же форма, что у выгрузки
-        # выше.
-        return self._client.download(ref.session_id)
-
-
-def _session_ids_in(row: dict[str, Any]) -> list[str]:
-    """Поиск идентификаторов сессии в кейсе.
-
-    Импорт внутри функции: сама функция живёт в `rest.py`, а он импортирует
-    этот модуль. На уровне файла это замкнуло бы круг импортов — тот же приём,
-    что и в фабрике источников ниже.
-    """
-    from src.infrastructure.sources.ncc.rest import session_ids_in  # noqa: PLC0415
-
-    return session_ids_in(row)
-
-
-def _text(value: Any) -> str | None:
-    """Прочитать текстовое значение и нормализовать отсутствие."""
-    return value.strip() or None if isinstance(value, str) else None
-
-
-def _case_moment(row: dict[str, Any], tz: ZoneInfo) -> datetime | None:
-    """Время создания кейса, если оно есть и разбирается.
-
-    Неразобранное время — не отказ: карточка звонка покажет дату без времени,
-    и это честнее, чем полночь у всех подряд.
-    """
-    raw = row.get("creationDate")
-    if not isinstance(raw, str) or not raw.strip():
-        return None
-    try:
-        moment = datetime.fromisoformat(raw.strip().replace("Z", "+00:00"))
-    except ValueError:
-        return None
-    return moment.astimezone(tz) if moment.tzinfo else moment.replace(tzinfo=tz)
-
-
 def build_daily_batch_source(settings: Settings) -> DailyBatchSource:
     """Собрать источник по настройкам.
 
@@ -420,7 +236,7 @@ def build_daily_batch_source(settings: Settings) -> DailyBatchSource:
             "sessionId (проверено на 100 кейсах), а входящие проекты закрыты "
             "403. Пока поставщик не сделал представление со списком сессий, "
             "используй sequence или local_export. Подробности — в "
-            "reference/2026-09-12-ncc-integration-pattern.md."
+            "docs/configuration.md."
         )
     if kind == "sequence":
         # Обход сквозного счётчика сессий. Единственный способ получить список

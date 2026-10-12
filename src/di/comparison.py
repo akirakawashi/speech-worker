@@ -20,7 +20,6 @@ from src.infrastructure.persistence.comparison import PostgresComparisonReposito
 from src.infrastructure.reports.comparison import write_csv, write_reasons_csv
 from src.setting.config import Settings
 
-CANDIDATE_MODEL_ENV: Final[str] = "SPEECH_ANALYSIS_LLM_CANDIDATE_MODEL"
 MAX_LIMIT: Final[int] = 1000
 
 

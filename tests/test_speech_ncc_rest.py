@@ -13,7 +13,6 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
 from typing import Any
 
 import httpx
@@ -464,88 +463,3 @@ def test_the_token_stays_out_of_the_repr() -> None:
     client = build_ncc_rest_client(_Settings(token="p6yH91D.bwMBQGiq8GWXUXc5TkM0eCemiUmjEJxf"))
 
     assert "p6yH91D" not in repr(client)
-
-
-# --------------------------------------------------------------------------- #
-# Перечисление кейсов за диапазон
-# --------------------------------------------------------------------------- #
-
-PROJECT = "corebo00000000000n63prtlf4p883fo"
-SINCE = datetime(2026, 9, 10, tzinfo=timezone(timedelta(hours=3)))
-UNTIL = datetime(2026, 9, 11, tzinfo=timezone(timedelta(hours=3)))
-
-
-async def test_the_range_is_sent_the_way_the_manual_spells_it() -> None:
-    """Смещение обязательно, микросекунд быть не должно.
-
-    Руководство перечисляет допустимые формы времени, и микросекунд нет ни в
-    одной. Без смещения сервер трактует время по-своему — и сутки съезжают
-    целиком, молча.
-    """
-    seen: dict[str, str] = {}
-
-    def handler(request: httpx.Request) -> httpx.Response:
-        seen["url"] = str(request.url)
-        return httpx.Response(200, json=[])
-
-    await _client(handler).cases(PROJECT, since=SINCE.replace(microsecond=123456), until=UNTIL)
-
-    assert "/projects/" + PROJECT + "/cases-batch/list" in seen["url"]
-    assert "modifiedAfter=2026-09-10T00%3A00%3A00%2B03%3A00" in seen["url"]
-    assert "modifiedBefore=2026-09-11T00%3A00%3A00%2B03%3A00" in seen["url"]
-    assert "page" not in seen["url"], "нулевая страница и её отсутствие — одно и то же"
-
-
-async def test_a_page_number_is_passed_only_when_it_is_not_the_first() -> None:
-    seen: dict[str, str] = {}
-
-    def handler(request: httpx.Request) -> httpx.Response:
-        seen["url"] = str(request.url)
-        return httpx.Response(200, json=[])
-
-    await _client(handler).cases(PROJECT, since=SINCE, until=UNTIL, page=3)
-
-    assert "page=3" in seen["url"]
-
-
-@pytest.mark.parametrize(
-    "body",
-    [
-        pytest.param([{"sessionId": "a"}], id="массив"),
-        pytest.param({"objectsOnPage": [{"sessionId": "a"}]}, id="objectsOnPage"),
-        pytest.param({"items": [{"sessionId": "a"}]}, id="items"),
-    ],
-)
-async def test_both_documented_shapes_of_a_page_are_understood(body: Any) -> None:
-    """Постраничные списки описаны и массивом, и объектом с элементами.
-
-    Выбрать одну форму значило бы зашить догадку о том, какая версия отвечает, —
-    и получить пустые сутки на другой.
-    """
-
-    def handler(request: httpx.Request) -> httpx.Response:
-        return httpx.Response(200, json=body)
-
-    assert await _client(handler).cases(PROJECT, since=SINCE, until=UNTIL) == [{"sessionId": "a"}]
-
-
-async def test_an_empty_project_is_refused_before_the_request() -> None:
-    """Пустой UUID дал бы запрос к `/projects//cases-batch/list`."""
-
-    def handler(request: httpx.Request) -> httpx.Response:  # pragma: no cover - не вызывается
-        raise AssertionError("запрос не должен был уйти")
-
-    with pytest.raises(NccError) as refused:
-        await _client(handler).cases("  ", since=SINCE, until=UNTIL)
-
-    assert refused.value.reason == "cases_project_is_empty"
-    assert refused.value.retryable is False
-
-
-async def test_an_empty_page_is_not_an_error() -> None:
-    """`204` — законный ответ: в проекте могло не быть кейсов за сутки."""
-
-    def handler(request: httpx.Request) -> httpx.Response:
-        return httpx.Response(204)
-
-    assert await _client(handler).cases(PROJECT, since=SINCE, until=UNTIL) == []

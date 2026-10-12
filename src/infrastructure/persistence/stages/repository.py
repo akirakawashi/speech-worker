@@ -7,8 +7,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.application.dto.pipeline import AnalyzeWork, IngestWork, TranscribeWork
 from src.application.dto.pipeline_input import AnalysisInput, CallForIngest, CallForTranscription
+from src.application.dto.quality_execution import QualityWork
 from src.application.ports.queue import ClaimedJob
-from src.infrastructure.persistence.stages import analyze, ingest, transcribe
+from src.infrastructure.persistence.stages import analyze, evaluate, ingest, transcribe
 
 SessionFactory = Callable[[], AsyncSession]
 
@@ -60,3 +61,7 @@ class PostgresStagePersistence:
     async def save_analysis(self, job: ClaimedJob, work: AnalyzeWork) -> None:
         """Записать разбор и снять оценку при изменении ролей без коммита."""
         await analyze.AnalyzeStatements().store(self._session, job, work)
+
+    async def save_evaluation(self, job: ClaimedJob, work: QualityWork) -> None:
+        """Записать итог оценки в текущей транзакции очереди без коммита."""
+        await evaluate.store(self._session, job, work)

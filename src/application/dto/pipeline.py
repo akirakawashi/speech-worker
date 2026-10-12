@@ -93,8 +93,8 @@ class StageResult(BaseModel):
 
     model_config = ConfigDict(frozen=True)
 
-    #: Новый статус звонка. Пишется в той же транзакции, что и результат.
-    processing_status: ProcessingStatus
+    #: Новый статус звонка в транзакции результата. None сохраняет текущий статус.
+    processing_status: ProcessingStatus | None
     #: Следующий этап. `None` — цепочка на этом звонке закончена, и это
     #: нормальный исход не только для последнего этапа: короткий звонок
     #: заканчивает её на первом.
