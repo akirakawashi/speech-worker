@@ -27,6 +27,9 @@ cp .env.example .env
 NCC. Полный цикл также требует существующего приложения разбора Dify.
 Команда с ограничением `--stages` требует настройки только выбранных этапов.
 
+Сценарии для импорта в Dify и их проверки хранятся в этом проекте:
+[назначение файлов и порядок использования](docs/architecture.md#сценарии-dify).
+
 ```bash
 uv run --locked speech-worker --lanes daily,backfill
 uv run --locked speech-worker --lanes daily --stages ingest,transcribe
