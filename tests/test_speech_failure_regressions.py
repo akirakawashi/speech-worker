@@ -93,7 +93,7 @@ def worker_env() -> SimpleNamespace:
     queue.fail.return_value = JobStatus.QUEUED
     queue.complete.return_value = True
     registry = StageRegistry()
-    for kind in JobKind:
+    for kind in (JobKind.INGEST, JobKind.TRANSCRIBE):
         handler = MagicMock(spec=StageHandler)
         handler.kind = kind
         registry.register(handler)

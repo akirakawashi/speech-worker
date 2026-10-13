@@ -41,7 +41,6 @@ from src.domain.calls.contracts import (
     AudioStatus,
     JobErrorClass,
     JobKind,
-    ProcessingStatus,
     RoleMethod,
     Speaker,
 )
@@ -337,9 +336,8 @@ class TranscribeHandler(StageHandler[TranscribeWork]):
     async def store(
         self, persistence: StagePersistence, job: ClaimedJob, work: TranscribeWork
     ) -> StageResult:
-        """Записать реплики через порт и передать звонок на разбор без обезличивания."""
-        await persistence.save_transcription(job, work)
-        return StageResult(processing_status=ProcessingStatus.ANALYZING, next_kind=JobKind.ANALYZE)
+        """Отказать при локальной записи ASR: результат принимает только бэкенд."""
+        raise RuntimeError("transcription completion belongs to the backend")
 
 
 def _operator_channel(deps: StageDeps) -> int:

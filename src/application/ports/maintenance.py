@@ -6,20 +6,14 @@ from src.application.dto.maintenance import (
     CatchUpCommand,
     MaintenancePlan,
     MaintenanceRequest,
-    QualityQueueReport,
-    QualityQueueRequest,
 )
 
 
 class BackendMaintenance(Protocol):
-    """Получить расписание и поставить оценку через служебный API бэкенда."""
+    """Получить готовое расписание приёма через служебный API бэкенда."""
 
     async def plan(self, command: MaintenanceRequest) -> MaintenancePlan:
         """Вернуть разрешённый срок и готовую команду выбранного действия."""
-        ...
-
-    async def enqueue(self, command: QualityQueueRequest) -> QualityQueueReport:
-        """Попросить бэкенд выбрать звонки и дедуплицировать задания оценки."""
         ...
 
 

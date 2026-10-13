@@ -100,7 +100,7 @@ async def test_transcribe_builds_delivery_without_llm_or_recording_source(runtim
         WorkerOptions(stages=(JobKind.TRANSCRIBE,), once=True), runtime.settings
     )
     resources = runtime.factory.call_args.args[2]
-    assert resources.analysis is resources.evaluation is None
+    assert not hasattr(resources, "analysis") and not hasattr(resources, "evaluation")
     assert resources.fetcher is None
     assert resources.storage is not None
     assert resources.transcription is not None
@@ -144,7 +144,8 @@ async def test_ingest_once_needs_no_models_or_scheduled_intake(runtime, monkeypa
     monkeypatch.setattr(module, "build_maintenance", maintenance)
     await module._run_worker(WorkerOptions(stages=(JobKind.INGEST,), once=True), runtime.settings)
     resources = runtime.factory.call_args.args[2]
-    assert resources.evaluation is resources.analysis is resources.transcription is None
+    assert not hasattr(resources, "analysis") and not hasattr(resources, "evaluation")
+    assert resources.transcription is None
     assert resources.fetcher is not None and resources.storage is not None
     maintenance.assert_not_called()
     runtime.worker.run_once.assert_awaited_once()

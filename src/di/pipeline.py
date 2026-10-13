@@ -12,9 +12,7 @@ from typing import Any
 from src.application.dto.pipeline_settings import PipelineSettings
 from src.application.pipeline.ingest import IngestHandler
 from src.application.pipeline.stages import StageHandler, StageRegistry
-from src.application.ports.quality_execution import QualityExecutor
 from src.application.ports.recordings import (
-    AnalysisBackend,
     RecordingStorage,
     RecordingTranscriber,
 )
@@ -37,8 +35,6 @@ def build_stage_deps(
     source: AudioStreamSource | None = None,
     storage: ObjectStorageTransport | RecordingStorage | None = None,
     transcription: RecordingTranscriber | None = None,
-    analysis: AnalysisBackend | None = None,
-    evaluation: QualityExecutor | None = None,
     runtime_settings: dict[str, Any] | None = None,
 ) -> WorkerResources:
     """Собрать порты этапов и отдельно сохранить фабрику транзакций исполнителя.
@@ -49,7 +45,6 @@ def build_stage_deps(
         source: Источник потока записи, если выполняется приём.
         storage: Транспорт хранилища записей, если он нужен выбранным этапам.
         transcription: Реализация распознавания подготовленного файла.
-        analysis: Реализация модели разбора разговора.
         runtime_settings: Проверенный снимок настроек обработки из базы.
 
     Returns:
@@ -67,8 +62,6 @@ def build_stage_deps(
         if storage is not None
         else None,
         transcription=transcription,
-        analysis=analysis,
-        evaluation=evaluation,
         runtime_settings=PipelineSettings.model_validate(runtime_settings or {}),
     )
 
@@ -80,9 +73,8 @@ def build_registry(
 ) -> StageRegistry:
     """Собрать получение и ASR; при выборе LLM или отсутствии доставки отказать до claim.
 
-    Выход: реестр только технических заданий. Переходные обработчики анализа
-    и оценки сохранены в проекте до удаления их отдельных потребителей,
-    но этот реестр никогда их не регистрирует.
+    Выход: реестр только технических заданий получения и распознавания.
+    Распознавание завершается подтверждением бэкенда.
     """
     supported = {JobKind.INGEST, JobKind.TRANSCRIBE}
     wanted = supported if stages is None else set(stages)

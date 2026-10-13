@@ -7,10 +7,7 @@ from src.application.dto.calls import JobErrorClass
 from src.application.dto.maintenance import (
     MaintenancePlan,
     MaintenanceRequest,
-    QualityQueueReport,
-    QualityQueueRequest,
 )
-from src.application.dto.quality_execution import QualityStep, QualityStepRequest
 from src.application.pipeline.stages import StageError
 
 
@@ -55,11 +52,3 @@ class BackendWorkerControl(BaseModel):
         if plan.action != command.action:
             raise StageError(JobErrorClass.INVALID_OUTPUT, "maintenance action mismatch")
         return plan
-
-    async def enqueue(self, command: QualityQueueRequest) -> QualityQueueReport:
-        """Проверить охват либо поставить задания оценки без вызова модели."""
-        return await self._post("quality-jobs", command, QualityQueueReport)
-
-    async def prepare(self, command: QualityStepRequest) -> QualityStep:
-        """Вернуть следующий готовый запрос LLM или итог оценки от бэкенда."""
-        return await self._post("quality-steps", command, QualityStep)

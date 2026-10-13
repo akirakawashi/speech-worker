@@ -35,23 +35,6 @@ class RecordingNotAvailable(Exception):
     """
 
 
-class AnalysisError(Exception):
-    """Воркфлоу не ответил или ответил не тем.
-
-    Текст ответа наружу не выносится: в нём лежит разговор целиком (BR-13).
-    """
-
-    def __init__(self, reason: str, *, retryable: bool) -> None:
-        """Настроить AnalysisError из переданных параметров и зависимостей."""
-        super().__init__(reason)
-        self.reason = reason
-        self.retryable = retryable
-
-
-class AnalysisNotConfigured(RuntimeError):
-    """Адрес или ключ приложения не заданы — ошибка развёртывания."""
-
-
 class WhisperNotConfigured(RuntimeError):
     """Адрес Whisper не задан.
 

@@ -34,10 +34,8 @@ from src.application.dto.pipeline import (
 from src.application.dto.pipeline_settings import PipelineSettings
 from src.application.ports.media import MediaProcessor
 from src.application.ports.pipeline import StagePersistence, StageRepository
-from src.application.ports.quality_execution import QualityExecutor
 from src.application.ports.queue import ClaimedJob
 from src.application.ports.recordings import (
-    AnalysisBackend,
     RecordingFetcher,
     RecordingStorage,
     RecordingTranscriber,
@@ -120,7 +118,7 @@ class StageDeps(BaseModel):
     хранилища.
     """
 
-    model_config = ConfigDict(frozen=False, arbitrary_types_allowed=True)
+    model_config = ConfigDict(frozen=False, arbitrary_types_allowed=True, extra="forbid")
 
     repository: StageRepository | None = None
     workspace: RecordingWorkspace
@@ -128,8 +126,6 @@ class StageDeps(BaseModel):
     fetcher: RecordingFetcher | None = None
     storage: RecordingStorage | None = None
     transcription: RecordingTranscriber | None = None
-    analysis: AnalysisBackend | None = None
-    evaluation: QualityExecutor | None = None
     #: Validated DB snapshot for this job; deployment secrets stay in settings.
     runtime_settings: PipelineSettings = Field(default_factory=PipelineSettings)
 
@@ -162,7 +158,11 @@ class StageRegistry:
 
     def assert_complete(self) -> None:
         """Все ли этапы закрыты обработчиками."""
-        missing = sorted(kind.value for kind in JobKind if kind not in self._handlers)
+        missing = sorted(
+            kind.value
+            for kind in (JobKind.INGEST, JobKind.TRANSCRIBE)
+            if kind not in self._handlers
+        )
         if missing:
             raise RuntimeError(
                 "no handler for pipeline stages: "

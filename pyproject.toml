@@ -1,7 +1,7 @@
 [project]
 name = "speech-worker"
 version = "0.1.0"
-description = "Independent worker for call ingestion, Whisper transcription and operator evaluation."
+description = "Independent worker for call ingestion, Whisper transcription and ASR delivery."
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
@@ -25,15 +25,8 @@ dev = [
 speech-worker = "src.presentation.cli.worker:main"
 speech-ingest = "src.presentation.cli.daily_ingest:main"
 speech-backfill = "src.presentation.cli.backfill:main"
-speech-evaluate = "src.presentation.cli.evaluate:main"
-speech-reanalyze = "src.presentation.cli.reanalyze:main"
 speech-sync-directories = "src.presentation.cli.directory_sync:main"
 speech-prune = "src.presentation.cli.prune:main"
-speech-fill-reasons = "src.presentation.cli.fill_reasons:main"
-speech-classifier-backfill = "src.presentation.cli.classifier_backfill:main"
-speech-seed-classifier = "src.presentation.cli.seed_classifier:main"
-speech-seed-call-reasons = "src.presentation.cli.seed_call_reasons:main"
-speech-compare-models = "src.presentation.cli.compare_models:main"
 
 [build-system]
 requires = ["uv_build>=0.11.18,<0.12.0"]

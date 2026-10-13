@@ -30,14 +30,12 @@ from src.domain.calls.contracts import (
     JobErrorClass,
     JobKind,
     JobLane,
-    ProcessingStatus,
     RoleMethod,
     Speaker,
 )
 from src.infrastructure.clients import whisper as whisper_module
 from src.infrastructure.clients.whisper import WhisperNotConfigured
 from src.infrastructure.media.audio import ChannelEnvelope
-from src.infrastructure.persistence.stages.repository import PostgresStagePersistence
 
 CALL_ID = uuid.UUID("22222222-3333-4444-5555-666666666666")
 KEY = "calls/2026/01/14/node_1_domain_2_nauss_0_1766092829_1138986.mp3"
@@ -292,49 +290,6 @@ async def test_a_mono_recording_yields_unattributed_replies(prepared) -> None:
 # --------------------------------------------------------------------------- #
 # Запись результата
 # --------------------------------------------------------------------------- #
-
-
-async def test_storing_replaces_the_previous_transcript_and_queues_analysis(prepared) -> None:
-    """Повтор этапа переписывает результат целиком.
-
-    Дописывание дало бы удвоенный разговор, а `ON CONFLICT DO UPDATE` оставило
-    бы реплики предыдущего прогона рядом с новыми.
-    """
-    session = _Session(_call_row())
-    whisper = _Whisper((_segment(0.0, 0.5, "раз"), _segment(1.0, 1.5, "два")))
-    envelope = _envelope(*[(-20.0, -60.0)] * 20)
-    work = await TranscribeHandler().work(_job(), prepared(session, whisper, envelope))
-
-    session.statements.clear()
-    result = await TranscribeHandler().store(PostgresStagePersistence(session), _job(), work)
-
-    verbs = [verb for verb, _params in session.statements]
-    assert verbs[0] == "DELETE", "старый транскрипт удаляется первым"
-    assert verbs.count("INSERT") == 3, "транскрипт и две реплики"
-    assert result.processing_status is ProcessingStatus.ANALYZING
-    assert result.next_kind is JobKind.ANALYZE
-
-
-async def test_the_text_is_stored_once_and_as_it_is(prepared) -> None:
-    """Обезличивания нет: у реплики один текст, и это то, что дал Whisper.
-
-    По нему же строится индекс поиска, поэтому звонок находится сразу после
-    расшифровки — второго этапа перед поиском нет.
-    """
-    session = _Session(_call_row())
-    whisper = _Whisper((_segment(0.0, 0.5, "мой номер +7 (999) 123-45-67"),))
-    envelope = _envelope(*[(-20.0, -60.0)] * 10)
-    work = await TranscribeHandler().work(_job(), prepared(session, whisper, envelope))
-
-    session.statements.clear()
-    await TranscribeHandler().store(PostgresStagePersistence(session), _job(), work)
-
-    inserted = [params for verb, params in session.statements if "text_raw" in params]
-    assert inserted, "реплика записана"
-    assert "9991234567" in "".join(ch for ch in inserted[0]["text_raw"] if ch.isdigit()), (
-        "текст сохраняется как есть"
-    )
-    assert "text_masked" not in inserted[0], "второй копии текста нет"
 
 
 # --------------------------------------------------------------------------- #

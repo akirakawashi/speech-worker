@@ -1,6 +1,6 @@
-"""Выполнение служебных команд: получить план, собрать записи, поставить оценку."""
+"""Выполнить готовый план приёма записей; оценку планирует бэкенд."""
 
-from src.application.dto.maintenance import MaintenancePlan, MaintenanceRequest, QualityQueueRequest
+from src.application.dto.maintenance import MaintenancePlan, MaintenanceRequest
 from src.application.ports.maintenance import BackendMaintenance, ScheduledIntake
 
 
@@ -17,9 +17,5 @@ class MaintenanceService:
         return await self._backend.plan(command)
 
     async def execute(self, plan: MaintenancePlan) -> None:
-        """Собрать метаданные либо поставить оценку; модели здесь не вызываются."""
-        if plan.ingest is not None:
-            await self._intake.collect(plan.ingest)
-        else:
-            assert plan.evaluation is not None
-            await self._backend.enqueue(QualityQueueRequest(selection=plan.evaluation))
+        """Передать готовую команду источника порту приёма метаданных."""
+        await self._intake.collect(plan.ingest)

@@ -35,7 +35,6 @@ from src.application.ports.queue import ClaimedJob, NewJob
 from src.di.ingestion import run_day
 from src.di.pipeline import build_stage_deps
 from src.domain.calls.contracts import (
-    AnalysisStatus,
     JobErrorClass,
     JobKind,
     JobLane,
@@ -148,12 +147,12 @@ class _ExplodingOnStore(StageHandler[str]):
 
 
 def _registry(*handlers: StageHandler[str]) -> StageRegistry:
-    """Реестр, закрытый для всех этапов: часть — заглушками-пустышками."""
+    """Реестр технических этапов: часть заменена подставными обработчиками."""
     registry = StageRegistry()
     given = {h.kind for h in handlers}
     for handler in handlers:
         registry.register(handler)
-    for kind in JobKind:
+    for kind in (JobKind.INGEST, JobKind.TRANSCRIBE):
         if kind not in given:
             registry.register(_Recorded(kind, next_kind=None))
     return registry
@@ -706,52 +705,6 @@ async def test_a_dead_job_takes_the_call_out_of_the_queue_counter(env) -> None:
         )
     assert row["status"] == JobStatus.DEAD.value
     assert row["processing_status"] == ProcessingStatus.FAILED.value
-
-
-async def test_a_dead_analysis_leaves_the_call_searchable(env) -> None:
-    """Требование PRC-05: отказ разметки не убирает звонок из поиска.
-
-    Текст расшифрован, найти его можно, отсутствует только тема. Пометить
-    такой звонок сломанным значило бы спрятать работу, которая сделана.
-    """
-    queue, deps, export = env
-    await _seed_day(queue, deps, export)
-    async with deps.sessionmaker() as session, session.begin():
-        call_id = await session.scalar(text("SELECT id FROM speech_calls LIMIT 1"))
-        await session.execute(text("DELETE FROM speech_jobs"))
-        await queue.enqueue(
-            session,
-            NewJob(
-                call_id=call_id,
-                kind=JobKind.ANALYZE,
-                lane=JobLane.DAILY,
-                max_attempts=1,
-            ),
-        )
-    failing = _Recorded(
-        JobKind.ANALYZE,
-        next_kind=None,
-        fail=StageError(JobErrorClass.INVALID_OUTPUT, "модель вернула не JSON"),
-    )
-    worker = Worker(queue, _registry(failing), deps, lanes=[JobLane.DAILY], worker_id="w1")
-
-    await worker.run_once()
-
-    async with deps.sessionmaker() as session:
-        row = (
-            (
-                await session.execute(
-                    text(
-                        "SELECT processing_status, analysis_status FROM speech_calls WHERE id = :id"
-                    ),
-                    {"id": call_id},
-                )
-            )
-            .mappings()
-            .one()
-        )
-    assert row["analysis_status"] == AnalysisStatus.FAILED.value
-    assert row["processing_status"] == ProcessingStatus.DONE.value, "звонок пропал из поиска"
 
 
 # --------------------------------------------------------------------------- #

@@ -2,12 +2,11 @@
 
 from __future__ import annotations
 
-import uuid
 from typing import ClassVar
 
 from pydantic import BaseModel, ConfigDict
 
-from src.domain.calls.contracts import JobKind, ProcessingStatus, RoleMethod, Sentiment, Speaker
+from src.domain.calls.contracts import JobKind, ProcessingStatus, RoleMethod, Speaker
 
 
 class IngestWork(BaseModel):
@@ -58,34 +57,6 @@ class TranscribeWork(BaseModel):
     role_method: RoleMethod
     duration_s: float | None
     replies: tuple[Reply, ...]
-
-
-class AnalyzeWork(BaseModel):
-    """Результат разбора, готовый к атомарному сохранению."""
-
-    model_config = ConfigDict(frozen=True)
-
-    #: Узел классификатора, до которого путь из ответа модели нашёлся в дереве.
-    #: `None` — мимо дерева уже уровень 1.
-    node_id: uuid.UUID | None
-    #: Названия найденных уровней — из дерева, а не из ответа.
-    path: tuple[str, ...]
-    sentiment: Sentiment | None
-    summary: str | None
-    #: Уровни 1 и 2 пути в перечислениях сегмента и продукта. `None` — уровня
-    #: нет или ему нет места в перечислении; подставлять умолчание нельзя.
-    segment: str | None = None
-    product: str | None = None
-    #: Роли, которые расставила модель. Пусто, если их не просили или этап
-    #: определил роли сам.
-    roles: tuple[tuple[int, Speaker], ...] = ()
-    #: Тема по предложению ИИ помощника: названия уровней и узел, если весь путь
-    #: есть в дереве.
-    suggestion: tuple[str, ...] = ()
-    suggestion_node_id: uuid.UUID | None = None
-    #: Причина обращения: фраза со стороны клиента и код справочника (S-32).
-    call_reason: str | None = None
-    call_reason_code: str | None = None
 
 
 class StageResult(BaseModel):

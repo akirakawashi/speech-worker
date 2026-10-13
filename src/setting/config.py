@@ -71,19 +71,10 @@ class Settings(BaseSettings):
     speech_whisper_timeout_seconds: float = Field(default=600.0, ge=30.0, le=1800.0)
     speech_whisper_vad_filter: bool = True
 
-    # Подготовка запросов бэкендом.
+    # Доставка ASR и готовые планы приёма бэкенда.
     speech_backend_base_url: str = ""
     speech_worker_api_token: str = Field(default="", repr=False)
     speech_backend_timeout_seconds: float = Field(default=30.0, ge=1.0, le=120.0)
-    # Прямой вызов LLM.
-    speech_analysis_llm_base_url: str = ""
-    speech_analysis_llm_api_key: str = Field(default="", repr=False)
-    speech_analysis_llm_timeout_seconds: float = Field(default=120.0, ge=10.0, le=280.0)
-
-    # Оценка продаж Телфина.
-    speech_quality_llm_base_url: str = ""
-    speech_quality_llm_api_key: str = ""
-    speech_quality_llm_timeout_seconds: float = Field(default=180.0, ge=10.0, le=1800.0)
 
 
 @lru_cache(maxsize=1)

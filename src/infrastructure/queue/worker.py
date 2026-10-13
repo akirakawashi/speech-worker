@@ -30,7 +30,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.application.dto.calls import (
     SPEECH_DEFAULT_SETTINGS,
-    AnalysisStatus,
     JobErrorClass,
     JobKind,
     JobLane,
@@ -108,6 +107,8 @@ class Worker:
         idle_sleep: float = IDLE_SLEEP_SECONDS,
     ) -> None:
         """Настроить Worker из переданных параметров и зависимостей."""
+        if registry.kinds - {JobKind.INGEST, JobKind.TRANSCRIBE}:
+            raise ValueError("speech-worker supports only ingest and transcribe")
         if not lanes:
             raise ValueError("worker requires at least one lane")
         # Неполный набор этапов допустим, но не молча. Раньше здесь стоял
@@ -488,33 +489,13 @@ class _LostLease(Exception):
 async def mark_call_after_dead_job(
     session: AsyncSession, call_id: uuid.UUID, kind: JobKind
 ) -> None:
-    """Перевести звонок в отказ после того, как его задание умерло.
+    """Записать отказ получения или ASR в транзакции очереди без commit.
 
-    Разбор по этапу — не аккуратность, а требование PRC-05. Отказ разметки не
-    должен убирать звонок из поиска: текст расшифрован, найти его можно,
-    отсутствует только чип темы. А отказ скачивания или расшифровки означает,
-    что искать нечего.
-
-    Без этого звонок оставался бы в статусе «в очереди» навсегда и попадал бы в
-    счётчик «в очереди на расшифровку» — тот, что видит пользователь на экране.
+    Вход — сессия, UUID звонка и технический этап. Чужой вид задания
+    отклоняется до SQL: отказы анализа и оценки обрабатывает бэкенд.
     """
-    if kind is JobKind.EVALUATE:
-        return
-    if kind is JobKind.ANALYZE:
-        await session.execute(
-            text(
-                "UPDATE speech_calls "
-                "SET analysis_status = :failed, processing_status = :done, "
-                "    completed_at = COALESCE(completed_at, now()), updated_at = now() "
-                "WHERE id = :call_id"
-            ),
-            {
-                "failed": AnalysisStatus.FAILED.value,
-                "done": ProcessingStatus.DONE.value,
-                "call_id": call_id,
-            },
-        )
-        return
+    if kind not in (JobKind.INGEST, JobKind.TRANSCRIBE):
+        raise ValueError("worker cannot change the outcome of a backend job")
     await session.execute(
         text(
             "UPDATE speech_calls "

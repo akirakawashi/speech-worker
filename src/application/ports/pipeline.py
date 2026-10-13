@@ -1,50 +1,29 @@
-"""Контракты чтения и записи данных этапов конвейера."""
+"""Порты чтения аудио и записи технического результата получения."""
 
 from typing import Protocol, runtime_checkable
 from uuid import UUID
 
-from src.application.dto.pipeline import AnalyzeWork, IngestWork, TranscribeWork
-from src.application.dto.pipeline_input import (
-    AnalysisInput,
-    CallForIngest,
-    CallForTranscription,
-)
-from src.application.dto.quality_execution import QualityWork
+from src.application.dto.pipeline import IngestWork
+from src.application.dto.pipeline_input import CallForIngest, CallForTranscription
 from src.application.ports.queue import ClaimedJob
 
 
 @runtime_checkable
 class StageRepository(Protocol):
-    """Загрузить типизированный снимок данных для долгой фазы этапа."""
+    """Прочитать метаданные записи без открытой транзакции во время HTTP."""
 
     async def load_ingest(self, call_id: UUID) -> CallForIngest | None:
         """Вернуть данные записи и проекта; None означает удалённый звонок."""
         ...
 
     async def load_transcription(self, call_id: UUID) -> CallForTranscription | None:
-        """Вернуть сведения о записи для распознавания или None."""
-        ...
-
-    async def load_analysis(self, call_id: UUID) -> AnalysisInput | None:
-        """Вернуть расшифровку со справочниками для разбора или None."""
+        """Вернуть сведения о сохранённом аудио для распознавания либо None."""
         ...
 
 
 class StagePersistence(Protocol):
-    """Записать результат в уже открытой транзакции вызывающего."""
+    """Сохранить получение аудио в транзакции очереди; ASR принимает бэкенд."""
 
     async def save_ingest(self, job: ClaimedJob, work: IngestWork) -> None:
-        """Сохранить метаданные записи и проекта, не завершая транзакцию."""
-        ...
-
-    async def save_transcription(self, job: ClaimedJob, work: TranscribeWork) -> None:
-        """Целиком заменить расшифровку в текущей транзакции."""
-        ...
-
-    async def save_analysis(self, job: ClaimedJob, work: AnalyzeWork) -> None:
-        """Сохранить разбор и снять оценку при изменении ролей."""
-        ...
-
-    async def save_evaluation(self, job: ClaimedJob, work: QualityWork) -> None:
-        """Сохранить оценку по неизменному входу без завершения транзакции."""
+        """Записать сведения о получении файла без самостоятельного commit."""
         ...

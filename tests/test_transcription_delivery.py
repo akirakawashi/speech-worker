@@ -148,7 +148,7 @@ async def test_saves_before_http_and_cleans_only_own_audio(tmp_path) -> None:
     assert receipt.contract_version == "1.0"
     cast(Any, deps.transcription).transcribe.assert_awaited_once()
     cast(Any, deps.storage).put_file.assert_not_called()
-    assert deps.analysis is None and deps.evaluation is None
+    assert not hasattr(deps, "analysis") and not hasattr(deps, "evaluation")
 
 
 async def test_restart_reuses_asr_with_new_claim_for_unchanged_audio(prepared) -> None:

@@ -14,6 +14,7 @@ from datetime import date
 from pathlib import Path
 from typing import TYPE_CHECKING, Final
 
+from src.application.dto.classifier import PATH_SEPARATOR, classifier_levels
 from src.application.dto.sources import (
     CallRef as CallRef,
 )
@@ -23,7 +24,6 @@ from src.application.errors.external import (
 from src.application.ports.sources import (
     DailyBatchSource as DailyBatchSource,
 )
-from src.infrastructure.persistence.classifier import PATH_SEPARATOR, classifier_levels
 
 logger = logging.getLogger(__name__)
 

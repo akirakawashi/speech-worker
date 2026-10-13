@@ -3,8 +3,6 @@
 from pathlib import Path
 from typing import Protocol, runtime_checkable
 
-from pydantic import JsonValue
-
 from src.application.dto.sources import CallRef
 from src.application.dto.transcription import TranscriptionResult
 
@@ -41,13 +39,4 @@ class RecordingTranscriber(Protocol):
 
     async def transcribe(self, path: Path) -> TranscriptionResult:
         """Вернуть DTO текста и сегментов распознавания подготовленного файла."""
-        ...
-
-
-@runtime_checkable
-class AnalysisBackend(Protocol):
-    """Вызов модели разбора с типизированным JSON, независимо от транспорта."""
-
-    async def run(self, inputs: dict[str, JsonValue]) -> dict[str, JsonValue]:
-        """Передать вход модели и вернуть её выход для проверки сценарием."""
         ...

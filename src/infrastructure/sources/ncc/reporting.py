@@ -40,7 +40,7 @@ from zoneinfo import ZoneInfo
 
 from pydantic import BaseModel, ConfigDict
 
-from src.infrastructure.persistence.classifier import classifier_levels
+from src.application.dto.classifier import classifier_levels
 from src.infrastructure.sources.ncc.source import SESSION_ID_RE, CallRef
 
 if TYPE_CHECKING:
