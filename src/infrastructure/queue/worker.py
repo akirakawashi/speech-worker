@@ -432,11 +432,14 @@ class Worker:
                 return
 
     async def _reap_loop(self) -> None:
-        """Возвращать просроченные аренды очереди до сигнала остановки."""
+        """Возвращать просроченные аренды только этапов реестра и выбранных полос."""
         while True:
             await asyncio.sleep(REAPER_INTERVAL_SECONDS)
             try:
-                expired = await self._queue.requeue_expired()
+                expired = await self._queue.requeue_expired(
+                    kinds=self._registry.ordered_kinds,
+                    lanes=self._lanes,
+                )
             except Exception as exc:  # noqa: BLE001 - сборщик не должен ронять воркер
                 logger.error("reaper failed type=%s", type(exc).__name__)
                 continue

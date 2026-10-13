@@ -228,9 +228,16 @@ class JobQueue(Protocol):
         """
         ...
 
-    async def requeue_expired(self) -> Sequence[ExpiredJob]:
+    async def requeue_expired(
+        self,
+        *,
+        kinds: Sequence[JobKind] | None = None,
+        lanes: Sequence[JobLane] | None = None,
+    ) -> Sequence[ExpiredJob]:
         """Разобрать задания с истёкшей арендой.
 
+        Фильтры ограничивают виды и полосы: None разрешает все, пустой список
+        не выбирает ничего. Выход содержит изменённые задания и их новый статус.
         Задание с непотраченными попытками возвращается в очередь; задание,
         исчерпавшее их, становится `dead`. Второе обязательно: воркер, который
         умер, а не отказал, через `fail` не проходит вовсе, и без проверки

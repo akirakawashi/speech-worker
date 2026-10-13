@@ -94,6 +94,37 @@ async def test_the_same_stage_is_never_queued_twice(queue: PostgresJobQueue) -> 
     assert second is None, "второе задание того же этапа не создаётся"
 
 
+@pytest.mark.parametrize("empty_filter", [None, "kinds", "lanes"])
+async def test_audio_recovery_leaves_analysis_and_other_lanes_running(
+    queue: PostgresJobQueue, empty_filter: str | None
+) -> None:
+    """Просроченные задания чужого этапа/полосы сохраняются; пустой фильтр не означает все."""
+    jobs = []
+    for kind, lane in (
+        (JobKind.INGEST, JobLane.DAILY),
+        (JobKind.ANALYZE, JobLane.DAILY),
+        (JobKind.TRANSCRIBE, JobLane.BACKFILL),
+    ):
+        await _enqueue(queue, await _make_call(queue), kind=kind, lane=lane)
+        job = await queue.claim([lane], "original-worker", kinds=[kind])
+        assert job is not None
+        jobs.append(job)
+    async with queue._sessionmaker() as session, session.begin():
+        await session.execute(
+            text("UPDATE speech_jobs SET locked_at = now() - interval '1 hour'"),
+        )
+    recovered = await queue.requeue_expired(
+        kinds=[] if empty_filter == "kinds" else [JobKind.INGEST, JobKind.TRANSCRIBE],
+        lanes=[] if empty_filter == "lanes" else [JobLane.DAILY],
+    )
+    assert [job.id for job in recovered] == ([] if empty_filter else [jobs[0].id])
+    async with queue._sessionmaker() as session:
+        rows = (await session.execute(text("SELECT id, status FROM speech_jobs"))).all()
+    states: dict[uuid.UUID, str] = dict(rows)
+    assert states[jobs[0].id] == ("running" if empty_filter else "queued")
+    assert states[jobs[1].id] == "running" and states[jobs[2].id] == "running"
+
+
 async def test_two_workers_never_claim_the_same_job(queue: PostgresJobQueue) -> None:
     """`SKIP LOCKED`: конкурент пропускает заблокированную строку, а не ждёт."""
     for _ in range(6):

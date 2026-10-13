@@ -265,6 +265,8 @@ _REQUEUE_EXPIRED_SQL = text(
                              THEN now() ELSE NULL END
      WHERE status = 'running'
        AND locked_at < now() - make_interval(secs => lease_seconds)
+       AND (CAST(:kinds AS text[]) IS NULL OR kind = ANY(CAST(:kinds AS text[])))
+       AND (CAST(:lanes AS text[]) IS NULL OR lane = ANY(CAST(:lanes AS text[])))
     RETURNING id, call_id, kind, status
     """
 )
@@ -567,7 +569,12 @@ class PostgresJobQueue:
             )
             return result.first() is not None
 
-    async def requeue_expired(self) -> list[ExpiredJob]:
+    async def requeue_expired(
+        self,
+        *,
+        kinds: Sequence[JobKind] | None = None,
+        lanes: Sequence[JobLane] | None = None,
+    ) -> list[ExpiredJob]:
         """Забрать задания с истёкшей арендой. Что с ними стало — в ответе.
 
         Бюджет попыток учитывается **здесь**, а не только в `fail`, и это была
@@ -583,7 +590,19 @@ class PostgresJobQueue:
         считаться таковым в статистике.
         """
         async with self._sessionmaker() as session, session.begin():
-            rows = (await session.execute(_REQUEUE_EXPIRED_SQL)).mappings().all()
+            rows = (
+                (
+                    await session.execute(
+                        _REQUEUE_EXPIRED_SQL,
+                        {
+                            "kinds": [kind.value for kind in kinds] if kinds is not None else None,
+                            "lanes": [lane.value for lane in lanes] if lanes is not None else None,
+                        },
+                    )
+                )
+                .mappings()
+                .all()
+            )
         return [
             ExpiredJob(
                 id=uuid.UUID(str(row["id"])),
