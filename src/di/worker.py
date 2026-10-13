@@ -7,11 +7,10 @@ import asyncio
 from src.application.dto.calls import JobKind
 from src.application.dto.maintenance import MaintenanceAction
 from src.application.dto.worker import WorkerOptions
-from src.di.analysis import build_analysis_client
-from src.di.evaluation import build_queue_evaluation
 from src.di.maintenance import build_maintenance
 from src.di.pipeline import build_registry, build_stage_deps
 from src.di.sources import build_worker_source
+from src.di.transcription_delivery import build_transcription_delivery
 from src.infrastructure.clients.whisper import build_whisper_client
 from src.infrastructure.persistence.session import (
     SPEECH_REQUIRED_SCHEMA_REVISION,
@@ -51,8 +50,6 @@ async def _run_worker(options: WorkerOptions, settings: Settings) -> None:
             if {JobKind.INGEST, JobKind.TRANSCRIBE} & stages
             else None,
             transcription=build_whisper_client(settings) if JobKind.TRANSCRIBE in stages else None,
-            analysis=build_analysis_client(settings) if JobKind.ANALYZE in stages else None,
-            evaluation=build_queue_evaluation(settings) if JobKind.EVALUATE in stages else None,
         )
         async with sessionmaker() as session:
             if not await speech_schema_is_ready(session):
@@ -63,7 +60,12 @@ async def _run_worker(options: WorkerOptions, settings: Settings) -> None:
         queue = PostgresJobQueue(sessionmaker, engine=engine)
         worker = Worker(
             queue,
-            build_registry(options.stages),
+            build_registry(
+                options.stages,
+                transcription_service=build_transcription_delivery(settings, sessionmaker)
+                if JobKind.TRANSCRIBE in stages
+                else None,
+            ),
             resources,
             lanes=options.lanes,
         )
@@ -80,8 +82,6 @@ async def _run_worker(options: WorkerOptions, settings: Settings) -> None:
             if not options.queue_only:
                 if JobKind.INGEST in stages:
                     actions.extend(source.value for source in options.sources)
-                if JobKind.EVALUATE in stages:
-                    actions.append("quality")
             if actions:
                 service = WorkerService(
                     worker, build_maintenance(settings, sessionmaker, queue), actions

@@ -136,7 +136,8 @@ _RESET_JOB_SQL = text(
            priority = CASE CAST(:lane AS text) WHEN 'daily' THEN 0 ELSE 100 END,
            attempts = 0, max_attempts = :max_attempts,
            run_after = COALESCE(:run_after, now()), lease_seconds = :lease_seconds,
-           payload = CAST(:payload AS jsonb),
+           payload = CAST(:payload AS jsonb) - '_claim_token' - '_transcription_receipt'
+                     - '_transcription_delivery',
            locked_by = NULL, locked_at = NULL, started_at = NULL, finished_at = NULL,
            last_error_class = NULL, last_error_at = NULL
      WHERE id = :job_id AND status IN ('done', 'failed', 'dead')
@@ -151,7 +152,9 @@ _CLAIM_SQL = text(
            locked_by = :worker_id,
            locked_at = now(),
            started_at = COALESCE(started_at, now()),
-           attempts = attempts + 1
+           attempts = attempts + 1,
+           payload = (payload - '_transcription_receipt')
+                     || jsonb_build_object('_claim_token', gen_random_uuid()::text)
      WHERE id = (
            SELECT id
              FROM speech_jobs
@@ -164,7 +167,7 @@ _CLAIM_SQL = text(
             LIMIT 1
      )
     RETURNING id, call_id, kind, lane, attempts, max_attempts, payload, lease_seconds,
-              priority
+              priority, locked_by
     """
 )
 
@@ -173,6 +176,10 @@ _HEARTBEAT_SQL = text(
     UPDATE speech_jobs
        SET locked_at = now()
      WHERE id = :job_id AND locked_by = :worker_id AND status = 'running'
+       AND (CAST(:claim_token AS text) IS NULL OR (
+           payload->>'_claim_token' = :claim_token
+           AND locked_at + make_interval(secs => lease_seconds) > clock_timestamp()
+       ))
     """
 )
 
@@ -196,12 +203,20 @@ _FAIL_SQL = text(
            locked_by = NULL,
            locked_at = NULL,
            last_error_class = :error_class,
+           payload = CASE WHEN :terminal OR attempts >= max_attempts
+                     THEN payload - '_claim_token' - '_transcription_receipt'
+                                  - '_transcription_delivery'
+                     ELSE payload - '_claim_token' - '_transcription_receipt' END,
            last_error_at = now(),
            finished_at = CASE
                WHEN :terminal OR attempts >= max_attempts THEN now()
                ELSE NULL
            END
-     WHERE id = :job_id AND locked_by = :worker_id
+     WHERE id = :job_id AND locked_by = :worker_id AND status = 'running'
+       AND (CAST(:claim_token AS text) IS NULL OR (
+           payload->>'_claim_token' = :claim_token
+           AND locked_at + make_interval(secs => lease_seconds) > clock_timestamp()
+       ))
     RETURNING status
     """
 )
@@ -220,8 +235,13 @@ _DEFER_SQL = text(
            attempts = GREATEST(attempts - 1, 0),
            run_after = now() + make_interval(secs => :delay),
            locked_by = NULL,
-           locked_at = NULL
+           locked_at = NULL,
+           payload = payload - '_claim_token' - '_transcription_receipt'
      WHERE id = :job_id AND locked_by = :worker_id AND status = 'running'
+       AND (CAST(:claim_token AS text) IS NULL OR (
+           payload->>'_claim_token' = :claim_token
+           AND locked_at + make_interval(secs => lease_seconds) > clock_timestamp()
+       ))
     RETURNING id
     """
 )
@@ -229,13 +249,20 @@ _DEFER_SQL = text(
 _REQUEUE_EXPIRED_SQL = text(
     """
     UPDATE speech_jobs
-       SET status = CASE WHEN attempts >= max_attempts THEN 'dead' ELSE 'queued' END,
+       SET status = CASE WHEN attempts >= max_attempts
+                         AND NOT (kind = 'transcribe' AND payload ? '_transcription_delivery')
+                         THEN 'dead' ELSE 'queued' END,
+           attempts = CASE WHEN kind = 'transcribe' AND payload ? '_transcription_delivery'
+                           THEN GREATEST(attempts - 1, 0) ELSE attempts END,
            locked_by = NULL,
            locked_at = NULL,
            last_error_class = 'lease_expired',
+           payload = payload - '_claim_token' - '_transcription_receipt',
            last_error_at = now(),
            run_after = now(),
-           finished_at = CASE WHEN attempts >= max_attempts THEN now() ELSE NULL END
+           finished_at = CASE WHEN attempts >= max_attempts
+                             AND NOT (kind = 'transcribe' AND payload ? '_transcription_delivery')
+                             THEN now() ELSE NULL END
      WHERE status = 'running'
        AND locked_at < now() - make_interval(secs => lease_seconds)
     RETURNING id, call_id, kind, status
@@ -451,13 +478,21 @@ class PostgresJobQueue:
                 payload=dict(row["payload"] or {}),
                 lease_seconds=int(row["lease_seconds"]),
                 priority=int(row["priority"]),
+                locked_by=str(row["locked_by"]),
             )
 
-    async def heartbeat(self, job_id: uuid.UUID, worker_id: str) -> bool:
+    async def heartbeat(
+        self, job_id: uuid.UUID, worker_id: str, *, claim_token: uuid.UUID | None = None
+    ) -> bool:
         """Продлить аренду задания, если оно всё ещё принадлежит указанному воркеру."""
         async with self._sessionmaker() as session, session.begin():
             result = await session.execute(
-                _HEARTBEAT_SQL, {"job_id": job_id, "worker_id": worker_id}
+                _HEARTBEAT_SQL,
+                {
+                    "job_id": job_id,
+                    "worker_id": worker_id,
+                    "claim_token": str(claim_token) if claim_token is not None else None,
+                },
             )
             # `Result` не объявляет `rowcount` в типах, но у UPDATE он есть:
             # это единственный способ отличить «продлили аренду» от «задание
@@ -478,6 +513,8 @@ class PostgresJobQueue:
         job_id: uuid.UUID,
         worker_id: str,
         error_class: JobErrorClass,
+        *,
+        claim_token: uuid.UUID | None = None,
     ) -> JobStatus | None:
         """Завершить неудачную попытку задания, назначив повтор либо окончательный отказ."""
         async with self._sessionmaker() as session, session.begin():
@@ -495,6 +532,7 @@ class PostgresJobQueue:
                 {
                     "job_id": job_id,
                     "worker_id": worker_id,
+                    "claim_token": str(claim_token) if claim_token is not None else None,
                     "backoff": delay,
                     "error_class": error_class.value,
                     # Детерминированный отказ не повторяют: повтор занимает
@@ -508,12 +546,24 @@ class PostgresJobQueue:
             status_row = result.first()
             return None if status_row is None else JobStatus(status_row[0])
 
-    async def defer(self, job_id: uuid.UUID, worker_id: str, *, delay_seconds: float) -> bool:
+    async def defer(
+        self,
+        job_id: uuid.UUID,
+        worker_id: str,
+        *,
+        delay_seconds: float,
+        claim_token: uuid.UUID | None = None,
+    ) -> bool:
         """Вернуть задание в очередь, не считая это отказом. Протокол — §8.1 ADR."""
         async with self._sessionmaker() as session, session.begin():
             result = await session.execute(
                 _DEFER_SQL,
-                {"job_id": job_id, "worker_id": worker_id, "delay": max(0.0, delay_seconds)},
+                {
+                    "job_id": job_id,
+                    "worker_id": worker_id,
+                    "claim_token": str(claim_token) if claim_token is not None else None,
+                    "delay": max(0.0, delay_seconds),
+                },
             )
             return result.first() is not None
 

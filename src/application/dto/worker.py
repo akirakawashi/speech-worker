@@ -13,7 +13,7 @@ class WorkerOptions(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
 
     lanes: tuple[JobLane, ...] = Field(default=(JobLane.DAILY, JobLane.BACKFILL), min_length=1)
-    stages: tuple[JobKind, ...] = Field(default=tuple(JobKind), min_length=1)
+    stages: tuple[JobKind, ...] = Field(default=(JobKind.INGEST, JobKind.TRANSCRIBE), min_length=1)
     once: bool = False
     queue_only: bool = False
     sources: tuple[CallSource, ...] = Field(
@@ -39,10 +39,10 @@ class WorkerOptions(BaseModel):
     @field_validator("stages", mode="before")
     @classmethod
     def parse_stages(cls, value: Any) -> Any:
-        """Прочитать строку этапов; пустая строка CLI включает все существующие этапы."""
+        """Прочитать этапы; пустая строка CLI включает только получение и распознавание."""
         if isinstance(value, str):
             names = tuple(part.strip() for part in value.split(",") if part.strip())
-            return names or tuple(JobKind)
+            return names or (JobKind.INGEST, JobKind.TRANSCRIBE)
         return value
 
     @field_validator("lanes")
@@ -54,5 +54,9 @@ class WorkerOptions(BaseModel):
     @field_validator("stages")
     @classmethod
     def ordered_stages(cls, value: tuple[JobKind, ...]) -> tuple[JobKind, ...]:
-        """Вернуть выбранные этапы в порядке конвейера без повторений."""
+        """Оставить технические этапы в порядке; LLM-задания принадлежат исполнителю бэкенда."""
+        if set(value) - {JobKind.INGEST, JobKind.TRANSCRIBE}:
+            raise ValueError(
+                "speech-worker supports only ingest and transcribe; LLM belongs to backend"
+            )
         return tuple(kind for kind in JobKind if kind in value)

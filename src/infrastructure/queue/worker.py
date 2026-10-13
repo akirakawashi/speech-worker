@@ -39,6 +39,7 @@ from src.application.dto.calls import (
 )
 from src.application.dto.pipeline_settings import PipelineSettings
 from src.application.pipeline.stages import (
+    StageDeferred,
     StageError,
     StageHandler,
     StageRegistry,
@@ -193,10 +194,18 @@ class Worker:
                         job.kind.value,
                         job.id,
                     )
-                    await self._queue.defer(job.id, self._id, delay_seconds=SLOT_RETRY_SECONDS)
+                    await self._queue.defer(
+                        job.id,
+                        self._id,
+                        delay_seconds=SLOT_RETRY_SECONDS,
+                        claim_token=job.claim_token,
+                    )
                     return
                 work = await self._work(job, handler, log)
             if work is _FAILED:
+                return
+            if handler.completes_externally is True:
+                log.info("backend confirmed stage: job=%s call=%s", job.id, job.call_id)
                 return
             await self._store(job, handler, work, log)
         finally:
@@ -225,6 +234,20 @@ class Worker:
         """
         try:
             return await handler.work(job, self._deps)
+        except StageDeferred as exc:
+            log.warning(
+                "delivery deferred: job=%s call=%s class=%s",
+                job.id,
+                job.call_id,
+                exc.error_class.value,
+            )
+            await self._queue.defer(
+                job.id,
+                self._id,
+                delay_seconds=SLOT_RETRY_SECONDS,
+                claim_token=job.claim_token,
+            )
+            return _FAILED
         except StageError as exc:
             log.warning(
                 "stage failed: job=%s call=%s attempt=%s class=%s",
@@ -255,7 +278,12 @@ class Worker:
         в статусе «в очереди» — и попадает в счётчик, который видит
         пользователь.
         """
-        status = await self._queue.fail(job.id, self._id, error_class)
+        if job.claim_token is None:
+            status = await self._queue.fail(job.id, self._id, error_class)
+        else:
+            status = await self._queue.fail(
+                job.id, self._id, error_class, claim_token=job.claim_token
+            )
         if status is not JobStatus.DEAD:
             return
         logger.error(
@@ -369,7 +397,12 @@ class Worker:
         while True:
             await asyncio.sleep(interval)
             try:
-                alive = await self._queue.heartbeat(job.id, self._id)
+                if job.claim_token is None:
+                    alive = await self._queue.heartbeat(job.id, self._id)
+                else:
+                    alive = await self._queue.heartbeat(
+                        job.id, self._id, claim_token=job.claim_token
+                    )
             except asyncio.CancelledError:
                 raise
             except Exception as exc:  # noqa: BLE001 - подтверждение аренды не должно ронять воркер

@@ -31,6 +31,21 @@ from src.domain.calls.contracts import JobErrorClass, JobKind, JobLane, JobStatu
 #: никто, и по нему видно, с какого момента задание действительно ждёт.
 NOT_BEFORE_KEY: Final[str] = "not_before"
 
+CLAIM_TOKEN_KEY: Final[str] = "_claim_token"
+TRANSCRIPTION_RECEIPT_KEY: Final[str] = "_transcription_receipt"
+
+
+def claim_token_from_payload(payload: dict[str, JsonValue]) -> uuid.UUID | None:
+    """Прочитать nonce захвата; отсутствующее/повреждённое значение не даёт права доставки."""
+    value = payload.get(CLAIM_TOKEN_KEY)
+    if not isinstance(value, str):
+        return None
+    try:
+        return uuid.UUID(value)
+    except ValueError:
+        return None
+
+
 #: С какого момента задание ждёт воркера — выражением SQL над `speech_jobs`.
 #: У обычного задания это момент создания, у отложенного — конец отсрочки.
 #: По нему считается возраст очереди: считая от создания, отложенные до ночи
@@ -76,6 +91,13 @@ class ClaimedJob(BaseModel):
     lease_seconds: int
     #: Приоритет задания; с ним же ставится следующий этап. `None` — по полосе.
     priority: int | None = None
+
+    @property
+    def claim_token(self) -> uuid.UUID | None:
+        """Вернуть идентификатор конкретного захвата из метаданных очереди."""
+        return claim_token_from_payload(self.payload)
+
+    locked_by: str | None = None
 
     @property
     def is_last_attempt(self) -> bool:
@@ -166,7 +188,9 @@ class JobQueue(Protocol):
         """
         ...
 
-    async def heartbeat(self, job_id: uuid.UUID, worker_id: str) -> bool:
+    async def heartbeat(
+        self, job_id: uuid.UUID, worker_id: str, *, claim_token: uuid.UUID | None = None
+    ) -> bool:
         """Продлить аренду. `False`, если задание уже отобрано другим."""
         ...
 
@@ -175,11 +199,20 @@ class JobQueue(Protocol):
         job_id: uuid.UUID,
         worker_id: str,
         error_class: JobErrorClass,
+        *,
+        claim_token: uuid.UUID | None = None,
     ) -> JobStatus | None:
         """Записать отказ. Возвращает новое состояние задания."""
         ...
 
-    async def defer(self, job_id: uuid.UUID, worker_id: str, *, delay_seconds: float) -> bool:
+    async def defer(
+        self,
+        job_id: uuid.UUID,
+        worker_id: str,
+        *,
+        delay_seconds: float,
+        claim_token: uuid.UUID | None = None,
+    ) -> bool:
         """Вернуть задание в очередь, не считая это отказом.
 
         Нужна там, где работа не сделана и не провалилась: внешний ресурс занят.

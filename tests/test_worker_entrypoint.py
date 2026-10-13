@@ -18,7 +18,15 @@ from src.setting.config import Settings
 
 @pytest.mark.parametrize(
     "parameters",
-    [{"lanes": ""}, {"lanes": "unknown"}, {"stages": "unknown"}, {"stages": []}],
+    [
+        {"lanes": ""},
+        {"lanes": "unknown"},
+        {"stages": "unknown"},
+        {"stages": []},
+        {"stages": "analyze"},
+        {"stages": "evaluate"},
+        {"stages": "transcribe,analyze"},
+    ],
 )
 def test_worker_options_reject_invalid_selection(parameters: dict[str, object]) -> None:
     """Неверные полосы и этапы отклоняются до получения задания."""
@@ -29,14 +37,17 @@ def test_worker_options_reject_invalid_selection(parameters: dict[str, object]) 
 def test_worker_options_preserve_pipeline_order_and_unique_lanes() -> None:
     """Повтор параметров не создаёт повторных обработчиков или полос."""
     options = WorkerOptions.model_validate(
-        {"lanes": "backfill,daily,backfill", "stages": "analyze,transcribe,analyze", "once": True}
+        {"lanes": "backfill,daily,backfill", "stages": "transcribe,ingest,transcribe", "once": True}
     )
     assert options.lanes == (JobLane.BACKFILL, JobLane.DAILY)
-    assert options.stages == (JobKind.TRANSCRIBE, JobKind.ANALYZE)
+    assert options.stages == (JobKind.INGEST, JobKind.TRANSCRIBE)
     assert options.once is True
 
 
-@pytest.mark.parametrize("arguments", [["--lanes", ""], ["--stages", "missing"]])
+@pytest.mark.parametrize(
+    "arguments",
+    [["--lanes", ""], ["--stages", "missing"], ["--stages", "analyze"], ["--stages", "evaluate"]],
+)
 def test_invalid_cli_does_not_construct_external_resources(
     monkeypatch: pytest.MonkeyPatch, arguments: list[str]
 ) -> None:
@@ -74,18 +85,28 @@ def runtime(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> SimpleNamespace:
         speech_analysis_llm_base_url="http://analysis.invalid/v1",
         speech_backend_base_url="http://backend.invalid",
         speech_worker_api_token="synthetic-key",
+        speech_whisper_base_url="http://whisper.invalid/v1",
+        speech_storage_base_url="http://storage.invalid",
+        speech_storage_access_key_id="test-access",
+        speech_storage_secret_key="test-secret",
+        speech_ncc_export_dir=str(tmp_path),
     )
     return SimpleNamespace(engine=engine, worker=worker, factory=worker_factory, settings=settings)
 
 
-async def test_analysis_only_needs_no_recording_source_storage_or_whisper(runtime) -> None:
-    """Этап analyze запускается с собственным HTTP-клиентом и закрывает пул после once."""
-    await module._run_worker(WorkerOptions(stages=(JobKind.ANALYZE,), once=True), runtime.settings)
+async def test_transcribe_builds_delivery_without_llm_or_recording_source(runtime) -> None:
+    """ASR использует хранилище и Whisper, не создавая клиентов LLM; пул закрывается."""
+    await module._run_worker(
+        WorkerOptions(stages=(JobKind.TRANSCRIBE,), once=True), runtime.settings
+    )
     resources = runtime.factory.call_args.args[2]
-    assert resources.analysis is not None
+    assert resources.analysis is resources.evaluation is None
     assert resources.fetcher is None
-    assert resources.storage is None
-    assert resources.transcription is None
+    assert resources.storage is not None
+    assert resources.transcription is not None
+    registry = runtime.factory.call_args.args[1]
+    assert registry.kinds == {JobKind.TRANSCRIBE}
+    assert registry.get(JobKind.TRANSCRIBE).completes_externally is True
     runtime.worker.run_once.assert_awaited_once()
     runtime.worker.run_forever.assert_not_awaited()
     runtime.engine.dispose.assert_awaited_once()
@@ -95,7 +116,7 @@ async def test_startup_failure_disposes_pool_before_processing(runtime) -> None:
     """Ненастроенный выбранный этап останавливает запуск, сохраняя закрытие пула."""
     settings = runtime.settings.model_copy(update={"speech_worker_api_token": ""})
     with pytest.raises(RuntimeError):
-        await module._run_worker(WorkerOptions(stages=(JobKind.ANALYZE,)), settings)
+        await module._run_worker(WorkerOptions(stages=(JobKind.TRANSCRIBE,)), settings)
     runtime.factory.assert_not_called()
     runtime.engine.dispose.assert_awaited_once()
 
@@ -104,36 +125,27 @@ async def test_incompatible_schema_stops_before_claiming_a_job(runtime, monkeypa
     """Воркер не обрабатывает общую очередь на неверной ревизии схемы."""
     monkeypatch.setattr(module, "speech_schema_is_ready", AsyncMock(return_value=False))
     with pytest.raises(RuntimeError, match="speech-backend migrations"):
-        await module._run_worker(WorkerOptions(stages=(JobKind.ANALYZE,)), runtime.settings)
+        await module._run_worker(WorkerOptions(stages=(JobKind.TRANSCRIBE,)), runtime.settings)
     runtime.factory.assert_not_called()
     runtime.engine.dispose.assert_awaited_once()
 
 
 async def test_long_running_worker_disposes_pool_when_loop_finishes(runtime) -> None:
     """Штатная остановка рабочего цикла проходит через освобождение ресурсов DI."""
-    await module._run_worker(WorkerOptions(stages=(JobKind.ANALYZE,)), runtime.settings)
+    await module._run_worker(WorkerOptions(stages=(JobKind.TRANSCRIBE,)), runtime.settings)
     runtime.worker.run_forever.assert_awaited_once()
     runtime.worker.run_once.assert_not_awaited()
     runtime.engine.dispose.assert_awaited_once()
 
 
-async def test_evaluation_once_needs_no_audio_or_scheduled_intake(runtime, monkeypatch) -> None:
-    """Одно задание оценки не запускает приём и не требует аудиосервисов."""
+async def test_ingest_once_needs_no_models_or_scheduled_intake(runtime, monkeypatch) -> None:
+    """Одно задание приёма не запускает расписание и не создаёт клиентов моделей."""
     maintenance = Mock(side_effect=AssertionError("once must not start collectors"))
     monkeypatch.setattr(module, "build_maintenance", maintenance)
-    settings = runtime.settings.model_copy(
-        update={"speech_quality_llm_base_url": "http://quality.invalid/v1"}
-    )
-    await module._run_worker(WorkerOptions(stages=(JobKind.EVALUATE,), once=True), settings)
+    await module._run_worker(WorkerOptions(stages=(JobKind.INGEST,), once=True), runtime.settings)
     resources = runtime.factory.call_args.args[2]
-    assert resources.evaluation is not None
-    assert (
-        resources.fetcher
-        is resources.storage
-        is resources.transcription
-        is resources.analysis
-        is None
-    )
+    assert resources.evaluation is resources.analysis is resources.transcription is None
+    assert resources.fetcher is not None and resources.storage is not None
     maintenance.assert_not_called()
     runtime.worker.run_once.assert_awaited_once()
     runtime.engine.dispose.assert_awaited_once()

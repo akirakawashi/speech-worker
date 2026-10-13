@@ -17,7 +17,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--queue-only",
         action="store_true",
-        help="только очередь, без автоматического приёма и постановки оценки",
+        help="только очередь, без автоматического приёма",
     )
     parser.add_argument(
         "--sources", default="ncc,telphin", help="источники автоматического приёма: ncc,telphin"
@@ -27,9 +27,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--stages",
         default="",
         help=(
-            "этапы через запятую: ingest,transcribe,analyze,evaluate. "
-            "Пусто — все четыре. Ограничение нужно, когда этап заведомо "
-            "невозможен: например, приложение LLM ещё не создано"
+            "этапы через запятую: ingest,transcribe. Пусто — оба. Анализ и оценку исполняет бэкенд"
         ),
     )
     return parser

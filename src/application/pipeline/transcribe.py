@@ -76,6 +76,17 @@ class TranscribeHandler(StageHandler[TranscribeWork]):
     async def work(self, job: ClaimedJob, deps: StageDeps) -> TranscribeWork:
         """Загрузить снимок и выполнить долгую фазу этапа через порты; вернуть DTO для записи."""
         call = await self._load_call(job, deps)
+        return await self.work_for_call(job, deps, call)
+
+    async def work_for_call(
+        self, job: ClaimedJob, deps: StageDeps, call: CallForTranscription
+    ) -> TranscribeWork:
+        """Распознать переданный снимок аудио и вернуть ASR; не перечитывать вход и не писать итог.
+
+        Вход: захват, технические порты и снимок записи. Выход: прежний DTO
+        текста/таймкодов/ролей. Временное аудио удаляется при успехе, ошибке
+        или отмене; исходный объект MinIO сохраняется.
+        """
         key = call.audio_object_key
         if call.audio_status != AudioStatus.STORED.value or not key:
             # Записи нет — распознавать нечего, и повтор её не вернёт.

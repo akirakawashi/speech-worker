@@ -10,9 +10,9 @@ from sqlalchemy import text
 from src.application.dto.calls import JobErrorClass, JobKind, JobLane
 from src.application.dto.quality import Evaluation
 from src.application.dto.quality_execution import QualityTotals, QualityWork
-from src.application.pipeline.stages import StageError
+from src.application.pipeline.evaluate import EvaluateHandler
+from src.application.pipeline.stages import StageError, StageRegistry
 from src.application.ports.queue import NewJob
-from src.di.pipeline import build_registry
 from src.infrastructure.persistence.evaluation import PostgresEvaluationRepository
 from src.infrastructure.queue.worker import Worker, mark_call_after_dead_job
 from tests.speech_db_support import speech_test_database_url
@@ -67,12 +67,19 @@ async def ready(env):
     return queue, deps, call_id, executor
 
 
+def _legacy_evaluation_registry() -> StageRegistry:
+    """Проверить сохранённый переходный обработчик, не регистрируя его в основном воркере."""
+    registry = StageRegistry()
+    registry.register(EvaluateHandler())
+    return registry
+
+
 async def test_result_and_job_complete_together_without_changing_call_status(ready) -> None:
     """Расшифрованный звонок остаётся готовым, completed_at не сдвигается оценкой."""
     queue, deps, call_id, _ = ready
     worker = Worker(
         queue,
-        build_registry([JobKind.EVALUATE]),
+        _legacy_evaluation_registry(),
         deps,
         lanes=[JobLane.DAILY],
         worker_id="quality-worker",
@@ -102,7 +109,7 @@ async def test_lost_lease_rolls_back_quality_result(ready) -> None:
     job = await queue.claim([JobLane.DAILY], "real-owner", kinds=[JobKind.EVALUATE])
     worker = Worker(
         queue,
-        build_registry([JobKind.EVALUATE]),
+        _legacy_evaluation_registry(),
         deps,
         lanes=[JobLane.DAILY],
         worker_id="lost-owner",
@@ -131,7 +138,7 @@ async def test_changed_transcript_retries_and_never_stores_stale_result(ready) -
         )
     worker = Worker(
         queue,
-        build_registry([JobKind.EVALUATE]),
+        _legacy_evaluation_registry(),
         deps,
         lanes=[JobLane.DAILY],
         worker_id="quality-worker",
@@ -160,7 +167,7 @@ async def test_backend_totals_are_written_without_local_recalculation(ready) -> 
     )
     worker = Worker(
         queue,
-        build_registry([JobKind.EVALUATE]),
+        _legacy_evaluation_registry(),
         deps,
         lanes=[JobLane.DAILY],
         worker_id="quality-worker",
@@ -187,7 +194,7 @@ async def test_dead_quality_and_reaper_do_not_mark_transcription_failed(ready) -
         await session.execute(text("UPDATE speech_jobs SET max_attempts = 1"))
     worker = Worker(
         queue,
-        build_registry([JobKind.EVALUATE]),
+        _legacy_evaluation_registry(),
         deps,
         lanes=[JobLane.DAILY],
         worker_id="quality-worker",

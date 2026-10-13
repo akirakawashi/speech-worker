@@ -616,7 +616,7 @@ async def test_a_failing_heartbeat_does_not_kill_the_worker(env, monkeypatch) ->
 
     attempts = {"n": 0}
 
-    async def exploding_heartbeat(job_id, worker_id):  # noqa: ANN001, ANN202
+    async def exploding_heartbeat(job_id, worker_id, *, claim_token=None):  # noqa: ANN001, ANN202
         attempts["n"] += 1
         raise RuntimeError("пул исчерпан")
 

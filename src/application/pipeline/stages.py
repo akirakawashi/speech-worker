@@ -63,6 +63,10 @@ class StageError(Exception):
         self.error_class = error_class
 
 
+class StageDeferred(StageError):
+    """Отложить доставку готового результата, сохранив буфер и попытку распознавания."""
+
+
 class StageHandler[W](ABC):
     """Один этап конвейера.
 
@@ -72,6 +76,7 @@ class StageHandler[W](ABC):
     """
 
     kind: ClassVar[JobKind]
+    completes_externally: ClassVar[bool] = False
 
     @abstractmethod
     async def work(self, job: ClaimedJob, deps: StageDeps) -> W:
