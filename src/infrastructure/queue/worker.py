@@ -310,7 +310,12 @@ class Worker:
         try:
             async with self._sessions() as session, session.begin():
                 result = await handler.store(PostgresStagePersistence(session), job, work)
-                owned = await self._queue.complete(session, job.id, self._id)
+                if job.claim_token is None:
+                    owned = await self._queue.complete(session, job.id, self._id)
+                else:
+                    owned = await self._queue.complete(
+                        session, job.id, self._id, claim_token=job.claim_token
+                    )
                 if not owned:
                     # Аренда истекла, задание переиграл другой воркер. Наш
                     # результат устарел; записать его — значит затереть чужую

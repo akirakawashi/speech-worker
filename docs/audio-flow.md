@@ -24,7 +24,7 @@ GigaAM в текущей реализации отсутствует.
    бэкенда `speech-process`; оценка выбирается независимо по расписанию.
    [Доставка, квитанция и восстановление](transcription-delivery.md).
 
-Исходники: [приём](../src/application/pipeline/ingest.py),
+Исходники: [получение записи](../src/application/ingestion/recording.py),
 [распознавание](../src/application/pipeline/transcribe.py),
 [клиент](../src/infrastructure/clients/whisper.py),
 [multipart-транспорт](../src/infrastructure/transcription/providers.py),

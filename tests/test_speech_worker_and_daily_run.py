@@ -11,18 +11,15 @@
 from __future__ import annotations
 
 import logging
-import random
 from collections.abc import AsyncIterator
-from datetime import date, datetime
+from datetime import UTC, date, datetime
 from pathlib import Path
 from typing import cast
-from zoneinfo import ZoneInfo
 
 import pytest
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
-from src.application.dto.daily_ingest import DayShare
 from src.application.pipeline.stages import (
     StageDeps,
     StageError,
@@ -32,7 +29,6 @@ from src.application.pipeline.stages import (
 )
 from src.application.ports.pipeline import StagePersistence
 from src.application.ports.queue import ClaimedJob, NewJob
-from src.di.ingestion import run_day
 from src.di.pipeline import build_stage_deps
 from src.domain.calls.contracts import (
     JobErrorClass,
@@ -41,11 +37,9 @@ from src.domain.calls.contracts import (
     JobStatus,
     ProcessingStatus,
 )
-from src.infrastructure.persistence.daily_ingest import CURSOR_SOURCE
 from src.infrastructure.persistence.stages.repository import PostgresStagePersistence
 from src.infrastructure.queue.postgres import PostgresJobQueue
 from src.infrastructure.queue.worker import Worker
-from src.infrastructure.sources.ncc.source import LocalExportSource
 from tests.speech_db_support import speech_test_database_url
 
 _TEST_DATABASE_URL = speech_test_database_url()
@@ -180,106 +174,32 @@ async def env(tmp_path: Path) -> AsyncIterator[tuple[PostgresJobQueue, StageDeps
 
 
 async def _seed_day(queue: PostgresJobQueue, deps: StageDeps, export: Path) -> None:
-    await run_day(
-        DAY, source=LocalExportSource(export), sessionmaker=deps.sessionmaker, queue=queue
-    )
+    """Подготовить два технических задания; приём метаданных проверяется в бэкенде."""
+    async with deps.sessionmaker() as session, session.begin():
+        for sid in (
+            "node_1_domain_2_nauss_0_1766092829_1138986",
+            "node_2_domain_1_nauss_1_1766092823_1603045",
+        ):
+            call_id = await session.scalar(
+                text(
+                    "INSERT INTO speech_calls "
+                    "(id, session_id, started_at, ended_at, duration_s, direction, "
+                    "audio_status, processing_status, analysis_status, "
+                    "first_seen_at, created_at, updated_at, source_snapshot) "
+                    "VALUES (gen_random_uuid(), :sid, :now, :now, 60, 'unknown', "
+                    "'pending', 'queued', 'pending', :now, :now, :now, '{}'::jsonb) RETURNING id"
+                ),
+                {"sid": sid, "now": datetime(2026, 1, 14, tzinfo=UTC)},
+            )
+            await queue.enqueue(
+                session,
+                NewJob(call_id=call_id, kind=JobKind.INGEST, lane=JobLane.DAILY, max_attempts=6),
+            )
 
 
 # --------------------------------------------------------------------------- #
 # Суточный прогон
 # --------------------------------------------------------------------------- #
-
-
-async def test_daily_run_registers_calls_and_queues_them(env) -> None:
-    queue, deps, export = env
-
-    report = await run_day(
-        DAY, source=LocalExportSource(export), sessionmaker=deps.sessionmaker, queue=queue
-    )
-
-    assert report.discovered == 2
-    assert report.enqueued == 2
-    assert report.already_known == 0
-    async with deps.sessionmaker() as session:
-        assert await session.scalar(text("SELECT count(*) FROM speech_calls")) == 2
-        assert (
-            await session.scalar(text("SELECT count(*) FROM speech_jobs WHERE kind = 'ingest'"))
-            == 2
-        )
-
-
-async def test_running_the_same_day_twice_changes_nothing(env) -> None:
-    """Повторный прогон за ту же дату — обычное дело: перезапуск после сбоя."""
-    queue, deps, export = env
-    await _seed_day(queue, deps, export)
-
-    second = await run_day(
-        DAY, source=LocalExportSource(export), sessionmaker=deps.sessionmaker, queue=queue
-    )
-
-    assert second.discovered == 2
-    assert second.enqueued == 0, "второй раз задания не ставятся"
-    assert second.already_known == 2
-    async with deps.sessionmaker() as session:
-        assert await session.scalar(text("SELECT count(*) FROM speech_calls")) == 2
-
-
-async def test_the_processed_day_is_recorded(env) -> None:
-    """Чтобы «звонков не было» отличалось от «прогон не запускался»."""
-    queue, deps, export = env
-    await _seed_day(queue, deps, export)
-
-    async with deps.sessionmaker() as session:
-        stored = await session.scalar(
-            text("SELECT last_processed_day FROM speech_ingest_cursors WHERE source = :s"),
-            {"s": CURSOR_SOURCE},
-        )
-    assert stored == DAY
-
-
-async def test_time_precision_is_recorded_when_the_source_has_no_clock(env) -> None:
-    """Выгрузка знает только дату — и это записано, а не замаскировано полночью."""
-    queue, deps, export = env
-    await _seed_day(queue, deps, export)
-
-    async with deps.sessionmaker() as session:
-        precision = await session.scalar(
-            text("SELECT source_snapshot->>'time_precision' FROM speech_calls LIMIT 1")
-        )
-    assert precision == "day"
-
-
-async def test_a_limited_run_takes_the_first_calls_and_leaves_the_day_open(env) -> None:
-    """Пробный прогон на части звонков не выдаёт сутки за обработанные."""
-    queue, deps, export = env
-
-    report = await run_day(
-        DAY, source=LocalExportSource(export), sessionmaker=deps.sessionmaker, queue=queue, limit=1
-    )
-
-    assert report.discovered == 2
-    assert report.enqueued == 1
-    assert report.limited_to == 1
-    async with deps.sessionmaker() as session:
-        assert await session.scalar(text("SELECT count(*) FROM speech_calls")) == 1
-        assert await session.scalar(text("SELECT count(*) FROM speech_ingest_cursors")) == 0
-
-
-async def test_a_limit_that_covers_the_day_is_a_full_run(env) -> None:
-    queue, deps, export = env
-
-    report = await run_day(
-        DAY, source=LocalExportSource(export), sessionmaker=deps.sessionmaker, queue=queue, limit=10
-    )
-
-    assert report.enqueued == 2
-    assert report.limited_to is None
-    async with deps.sessionmaker() as session:
-        stored = await session.scalar(
-            text("SELECT last_processed_day FROM speech_ingest_cursors WHERE source = :s"),
-            {"s": CURSOR_SOURCE},
-        )
-    assert stored == DAY
 
 
 # --------------------------------------------------------------------------- #
@@ -711,205 +631,53 @@ async def test_a_dead_job_takes_the_call_out_of_the_queue_counter(env) -> None:
 # Дневная доля: часть новых звонков сразу, остальные — с начала ночи
 # --------------------------------------------------------------------------- #
 
-MSK = ZoneInfo("Europe/Moscow")
-#: Полдень и поздний вечер по Москве: день и ночь для доли «19 → 7».
-#:
-#: Год дальний нарочно. Отсрочка сверяется с часами базы (`run_after > now()`),
-#: и воркер берёт задание по ним же: дата, оставшаяся в прошлом, превращает
-#: «отложено до ночи» в «уже можно брать», и тесты падают с того же вечера.
-NOON = datetime(2099, 10, 8, 12, 0, tzinfo=MSK)
-EVENING = datetime(2099, 10, 8, 21, 0, tzinfo=MSK)
-NIGHT_START = datetime(2099, 10, 8, 19, 0, tzinfo=MSK)
 
-
-def _share(share: float) -> DayShare:
-    return DayShare(share=share, night_from=19, night_until=7)
-
-
-class _Lots(random.Random):
-    """Жребий с заданными исходами — по одному на звонок, в порядке источника."""
-
-    def __init__(self, *outcomes: float) -> None:
-        super().__init__()
-        self._outcomes = list(outcomes)
-
-    def random(self) -> float:
-        return self._outcomes.pop(0)
-
-
-async def _ingest_jobs(deps: StageDeps) -> list[dict]:
-    async with deps.sessionmaker() as session:
-        rows = await session.execute(
-            text(
-                "SELECT j.priority, j.run_after, j.payload, j.run_after > now() AS held "
-                "FROM speech_jobs AS j JOIN speech_calls AS c ON c.id = j.call_id "
-                "WHERE j.kind = 'ingest' ORDER BY c.session_id"
-            )
-        )
-        return [dict(row) for row in rows.mappings()]
-
-
-async def _release(deps: StageDeps) -> None:
-    """Ночь наступила: отсрочка заданий кончилась."""
+@pytest.mark.parametrize("change", ["nonce", "expiry", "last_update"])
+async def test_ingest_final_commit_rejects_old_nonce_or_expired_lease(env, monkeypatch, change):
+    """Результат, статус и следующий этап откатываются даже при потере срока на последнем UPDATE."""
+    queue, deps, export = env
+    await _seed_day(queue, deps, export)
+    job = await queue.claim([JobLane.DAILY], "same-worker", kinds=[JobKind.INGEST])
     async with deps.sessionmaker() as session, session.begin():
-        await session.execute(text("UPDATE speech_jobs SET run_after = now()"))
-
-
-async def test_by_day_a_share_of_new_calls_starts_at_once_and_the_rest_waits_for_the_night(
-    env,
-) -> None:
-    queue, deps, export = env
-
-    report = await run_day(
-        DAY,
-        source=LocalExportSource(export),
-        sessionmaker=deps.sessionmaker,
-        queue=queue,
-        day_share=_share(0.5),
-        now=NOON,
-        # Первый звонок вытянул «сразу», второй — «ночью».
-        rng=_Lots(0.2, 0.7),
-    )
-
-    assert (report.enqueued, report.deferred) == (2, 1)
-    assert "до ночи отложено 1" in report.describe()
-    now_job, night_job = await _ingest_jobs(deps)
-    assert (now_job["priority"], now_job["held"], now_job["payload"]) == (0, False, {})
-    # Отложенный ждёт начала ночи и уступает свежим и после неё.
-    assert (night_job["priority"], night_job["held"]) == (10, True)
-    assert night_job["run_after"] == NIGHT_START
-    assert night_job["payload"] == {"not_before": NIGHT_START.isoformat()}
-
-    # Воркер днём берёт только свежий; отложенного для него нет.
-    worker = Worker(
-        queue,
-        _registry(_Recorded(JobKind.INGEST, next_kind=None)),
-        deps,
-        lanes=[JobLane.DAILY],
-        worker_id="w1",
-    )
-    assert await worker.run_once() is True
-    assert await worker.run_once() is False
-
-
-async def test_at_night_every_new_call_starts_at_once(env) -> None:
-    queue, deps, export = env
-
-    report = await run_day(
-        DAY,
-        source=LocalExportSource(export),
-        sessionmaker=deps.sessionmaker,
-        queue=queue,
-        # Доля ноль — днём не шло бы ничего. Ночью она не действует.
-        day_share=_share(0.0),
-        now=EVENING,
-    )
-
-    assert (report.enqueued, report.deferred) == (2, 0)
-    assert [(job["priority"], job["held"]) for job in await _ingest_jobs(deps)] == [
-        (0, False),
-        (0, False),
-    ]
-
-
-async def test_a_share_of_zero_holds_the_whole_day_and_one_holds_nothing(env) -> None:
-    queue, deps, export = env
-    source = LocalExportSource(export)
-
-    held = await run_day(
-        DAY,
-        source=source,
-        sessionmaker=deps.sessionmaker,
-        queue=queue,
-        day_share=_share(0.0),
-        now=NOON,
-    )
-    assert (held.enqueued, held.deferred) == (2, 2)
-
-    # Повторный прогон жребий не перебрасывает: заведённое задание он не трогает,
-    # даже если доля с тех пор стала «всё сразу».
-    again = await run_day(
-        DAY,
-        source=source,
-        sessionmaker=deps.sessionmaker,
-        queue=queue,
-        day_share=_share(1.0),
-        now=NOON,
-    )
-    assert (again.enqueued, again.deferred) == (0, 0)
-    assert [job["held"] for job in await _ingest_jobs(deps)] == [True, True]
-
-
-async def test_the_priority_of_a_run_puts_a_lesser_source_behind(env) -> None:
-    """`--priority`: продажи идут после поддержки, а отложенное — после свежего."""
-    queue, deps, export = env
-
-    await run_day(
-        DAY,
-        source=LocalExportSource(export),
-        sessionmaker=deps.sessionmaker,
-        queue=queue,
-        priority=20,
-        day_share=_share(0.5),
-        now=NOON,
-        rng=_Lots(0.2, 0.7),
-    )
-
-    assert [job["priority"] for job in await _ingest_jobs(deps)] == [20, 30]
-
-
-async def test_a_held_call_stays_behind_fresh_ones_through_every_stage(env) -> None:
-    """Срочность — свойство звонка: следующий этап наследует приоритет, а не сбрасывает его."""
-    queue, deps, export = env
-    await run_day(
-        DAY,
-        source=LocalExportSource(export),
-        sessionmaker=deps.sessionmaker,
-        queue=queue,
-        day_share=_share(0.5),
-        now=NOON,
-        rng=_Lots(0.2, 0.7),
-    )
-    await _release(deps)
-    ingest = _Recorded(JobKind.INGEST, next_kind=JobKind.TRANSCRIBE)
-    transcribe = _Recorded(JobKind.TRANSCRIBE, next_kind=None)
-    worker = Worker(
-        queue, _registry(ingest, transcribe), deps, lanes=[JobLane.DAILY], worker_id="w"
-    )
-
-    while await worker.run_once():
-        pass
-
-    assert [job.priority for job in ingest.calls] == [0, 10]
-    assert [job.priority for job in transcribe.calls] == [0, 10]
-    # Свежий звонок проходит оба этапа раньше, чем отложенный начинает первый:
-    # приём отложенного (10) уступает расшифровке свежего (0).
-    async with deps.sessionmaker() as session:
-        finished = (
+        await session.execute(text("DELETE FROM speech_jobs WHERE id <> :id"), {"id": job.id})
+    if change == "nonce":
+        await queue.defer(job.id, "same-worker", delay_seconds=0, claim_token=job.claim_token)
+        winner = await queue.claim([JobLane.DAILY], "same-worker", kinds=[JobKind.INGEST])
+        assert winner.attempts == job.attempts and winner.claim_token != job.claim_token
+    elif change == "expiry":
+        async with deps.sessionmaker() as session, session.begin():
             await session.execute(
-                text(
-                    "SELECT kind, priority FROM speech_jobs WHERE status = 'done' "
-                    "ORDER BY finished_at"
-                )
+                text("UPDATE speech_jobs SET locked_at=now()-interval '1 day' WHERE id=:id"),
+                {"id": job.id},
             )
-        ).all()
-    assert [tuple(row) for row in finished] == [
-        ("ingest", 0),
-        ("transcribe", 0),
-        ("ingest", 10),
-        ("transcribe", 10),
-    ]
+    else:
+        original = queue.complete
 
+        async def expire_before_final_update(session, job_id, worker_id, **kwargs):
+            await session.execute(
+                text("UPDATE speech_jobs SET locked_at=now()-interval '1 day' WHERE id=:id"),
+                {"id": job_id},
+            )
+            return await original(session, job_id, worker_id, **kwargs)
 
-async def test_without_a_share_the_run_behaves_as_before(env) -> None:
-    queue, deps, export = env
-
-    report = await run_day(
-        DAY, source=LocalExportSource(export), sessionmaker=deps.sessionmaker, queue=queue
-    )
-
-    assert report.deferred == 0
-    assert [(job["priority"], job["held"], job["payload"]) for job in await _ingest_jobs(deps)] == [
-        (0, False, {}),
-        (0, False, {}),
-    ]
+        monkeypatch.setattr(queue, "complete", expire_before_final_update)
+    handler = _Recorded(JobKind.INGEST, next_kind=JobKind.TRANSCRIBE)
+    worker = Worker(queue, _registry(handler), deps, lanes=[JobLane.DAILY], worker_id="same-worker")
+    await worker._store(job, handler, "stale-result", logging.getLogger(__name__))
+    async with deps.sessionmaker() as session:
+        assert (
+            await session.scalar(
+                text("SELECT summary FROM speech_calls WHERE id=:id"), {"id": job.call_id}
+            )
+            is None
+        )
+        assert (
+            await session.scalar(text("SELECT count(*) FROM speech_jobs WHERE kind='transcribe'"))
+            == 0
+        )
+        assert (
+            await session.scalar(
+                text("SELECT status FROM speech_jobs WHERE id=:id"), {"id": job.id}
+            )
+            == "running"
+        )

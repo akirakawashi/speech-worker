@@ -10,7 +10,7 @@ from collections.abc import Collection
 from typing import Any
 
 from src.application.dto.pipeline_settings import PipelineSettings
-from src.application.pipeline.ingest import IngestHandler
+from src.application.ingestion.recording import RecordingIngestionService
 from src.application.pipeline.stages import StageHandler, StageRegistry
 from src.application.ports.recordings import (
     RecordingStorage,
@@ -24,6 +24,7 @@ from src.infrastructure.persistence.stages.repository import PostgresStageReposi
 from src.infrastructure.queue.resources import WorkerResources
 from src.infrastructure.sources.fetcher import AudioStreamSource, SourceRecordingFetcher
 from src.infrastructure.storage.pipeline import ObjectStorageTransport, PipelineStorage
+from src.presentation.jobs.ingest import IngestHandler
 from src.presentation.jobs.transcribe import TranscriptionHandler
 from src.setting.config import Settings
 
@@ -70,6 +71,7 @@ def build_registry(
     stages: Collection[JobKind] | None = None,
     *,
     transcription_service: TranscriptionDeliveryService | None = None,
+    ingest_service: RecordingIngestionService | None = None,
 ) -> StageRegistry:
     """Собрать получение и ASR; при выборе LLM или отсутствии доставки отказать до claim.
 
@@ -81,7 +83,11 @@ def build_registry(
     unknown = wanted - supported
     if unknown:
         raise ValueError("speech-worker supports only ingest and transcribe")
-    handlers: dict[JobKind, StageHandler[Any]] = {JobKind.INGEST: IngestHandler()}
+    handlers: dict[JobKind, StageHandler[Any]] = {}
+    if JobKind.INGEST in wanted:
+        if ingest_service is None:
+            raise RuntimeError("ingest control service is not configured")
+        handlers[JobKind.INGEST] = IngestHandler(ingest_service)
     if JobKind.TRANSCRIBE in wanted:
         if transcription_service is None:
             raise RuntimeError("transcription delivery service is not configured")

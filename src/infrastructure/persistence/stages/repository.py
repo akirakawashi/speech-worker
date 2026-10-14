@@ -6,7 +6,7 @@ from uuid import UUID
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.application.dto.pipeline import IngestWork
-from src.application.dto.pipeline_input import CallForIngest, CallForTranscription
+from src.application.dto.pipeline_input import CallForTranscription
 from src.application.ports.queue import ClaimedJob
 from src.infrastructure.persistence.stages import ingest, transcribe
 
@@ -25,11 +25,6 @@ class PostgresStageRepository:
         if self._sessions is None:
             raise RuntimeError("pipeline session factory is not configured")
         return self._sessions()
-
-    async def load_ingest(self, call_id: UUID) -> CallForIngest | None:
-        """Загрузить метаданные звонка для приёма записи и закрыть сессию."""
-        async with self._session() as session:
-            return await ingest.load(session, call_id)
 
     async def load_transcription(self, call_id: UUID) -> CallForTranscription | None:
         """Загрузить метаданные сохранённой записи и закрыть сессию."""

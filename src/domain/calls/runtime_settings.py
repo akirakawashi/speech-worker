@@ -1,7 +1,6 @@
 """Правила администраторских настроек и безопасные значения по умолчанию."""
 
 import logging
-import re
 from copy import deepcopy
 from typing import Any
 
@@ -12,10 +11,8 @@ logger = logging.getLogger(__name__)
 
 _INTEGER_RANGES = {
     "retention_days": (1, 36500),
-    "short_call_threshold_s": (0, 3600),
     "stereo_operator_channel": (0, 1),
     "transcribe_concurrency": (1, 32),
-    "backfill_window_days": (1, 36500),
 }
 
 
@@ -50,8 +47,6 @@ def validated_setting(key: str, value: Any) -> Any:
             raise ValueError("invalid max_attempts: supply all stages with integers 1..100")
     elif key == "stereo_role_method" and value != "stereo_energy":
         raise ValueError("unsupported stereo_role_method: only stereo_energy is implemented")
-    elif key == "daily_ingest_at" and not re.fullmatch(r"(?:[01]\d|2[0-3]):[0-5]\d", value):
-        raise ValueError("invalid daily_ingest_at: expected HH:MM")
     return deepcopy(value)
 
 

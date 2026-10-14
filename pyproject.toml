@@ -1,7 +1,7 @@
 [project]
 name = "speech-worker"
 version = "0.1.0"
-description = "Independent worker for call ingestion, Whisper transcription and ASR delivery."
+description = "Recording download, Whisper transcription and reliable ASR delivery."
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
@@ -23,8 +23,6 @@ dev = [
 
 [project.scripts]
 speech-worker = "src.presentation.cli.worker:main"
-speech-ingest = "src.presentation.cli.daily_ingest:main"
-speech-backfill = "src.presentation.cli.backfill:main"
 speech-sync-directories = "src.presentation.cli.directory_sync:main"
 speech-prune = "src.presentation.cli.prune:main"
 

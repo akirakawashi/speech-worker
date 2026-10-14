@@ -14,14 +14,6 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--lanes", default="daily,backfill", help="полосы через запятую: daily,backfill"
     )
-    parser.add_argument(
-        "--queue-only",
-        action="store_true",
-        help="только очередь, без автоматического приёма",
-    )
-    parser.add_argument(
-        "--sources", default="ncc,telphin", help="источники автоматического приёма: ncc,telphin"
-    )
     parser.add_argument("--once", action="store_true", help="обработать одно задание и выйти")
     parser.add_argument(
         "--stages",

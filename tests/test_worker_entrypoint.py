@@ -140,13 +140,10 @@ async def test_long_running_worker_disposes_pool_when_loop_finishes(runtime) -> 
 
 async def test_ingest_once_needs_no_models_or_scheduled_intake(runtime, monkeypatch) -> None:
     """Одно задание приёма не запускает расписание и не создаёт клиентов моделей."""
-    maintenance = Mock(side_effect=AssertionError("once must not start collectors"))
-    monkeypatch.setattr(module, "build_maintenance", maintenance)
     await module._run_worker(WorkerOptions(stages=(JobKind.INGEST,), once=True), runtime.settings)
     resources = runtime.factory.call_args.args[2]
     assert not hasattr(resources, "analysis") and not hasattr(resources, "evaluation")
     assert resources.transcription is None
     assert resources.fetcher is not None and resources.storage is not None
-    maintenance.assert_not_called()
     runtime.worker.run_once.assert_awaited_once()
     runtime.engine.dispose.assert_awaited_once()

@@ -15,7 +15,7 @@ from src.infrastructure.persistence.write_trace import install_write_trace
 from src.setting.config import Settings
 
 # Схема общая с speech-backend; воркер проверяет её и не запускает миграции.
-SPEECH_REQUIRED_SCHEMA_REVISION: str = "sp_0016_evaluation_jobs"
+SPEECH_REQUIRED_SCHEMA_REVISION: str = "sp_0017_analysis_storage"
 _SPEECH_REQUIRED_TABLES = (
     "speech_calls",
     "speech_call_reasons",

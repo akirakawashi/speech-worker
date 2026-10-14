@@ -186,8 +186,13 @@ _HEARTBEAT_SQL = text(
 _COMPLETE_SQL = text(
     """
     UPDATE speech_jobs
-       SET status = 'done', finished_at = now(), locked_by = NULL, locked_at = NULL
+       SET status = 'done', finished_at = now(), locked_by = NULL, locked_at = NULL,
+           payload = payload - '_ingest_admission'
      WHERE id = :job_id AND locked_by = :worker_id AND status = 'running'
+       AND (CAST(:claim_token AS text) IS NULL OR (
+           payload ->> '_claim_token' = :claim_token
+           AND locked_at + make_interval(secs => lease_seconds) > clock_timestamp()
+       ))
     """
 )
 
@@ -502,9 +507,23 @@ class PostgresJobQueue:
             updated: int = result.rowcount  # type: ignore[attr-defined]
             return updated > 0
 
-    async def complete(self, session: AsyncSession, job_id: uuid.UUID, worker_id: str) -> bool:
-        """Завершить задание текущего владельца аренды в переданной транзакции."""
-        result = await session.execute(_COMPLETE_SQL, {"job_id": job_id, "worker_id": worker_id})
+    async def complete(
+        self,
+        session: AsyncSession,
+        job_id: uuid.UUID,
+        worker_id: str,
+        *,
+        claim_token: uuid.UUID | None = None,
+    ) -> bool:
+        """Завершить живой nonce в транзакции результата; без nonce доступен прежний API."""
+        result = await session.execute(
+            _COMPLETE_SQL,
+            {
+                "job_id": job_id,
+                "worker_id": worker_id,
+                "claim_token": str(claim_token) if claim_token is not None else None,
+            },
+        )
         # Ноль строк означает, что задание больше не наше: аренда истекла и его
         # переиграл другой воркер. Вызывающий обязан откатить транзакцию.
         updated: int = result.rowcount  # type: ignore[attr-defined]

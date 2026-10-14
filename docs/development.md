@@ -50,7 +50,7 @@ SPEECH_POSTGRES_TEST_URL направляем только в отдельную
 можно создать speech_worker_test.
 
 Перед прогоном применяем существующие миграции speech-backend к этой тестовой
-базе до sp_0016_evaluation_jobs. В самом воркере миграций нет.
+базе до sp_0017_analysis_storage. В самом воркере миграций нет.
 SPEECH_REQUIRE_LIVE_PROOFS=1 делает пропуск проверок PostgreSQL неуспехом прогона.
 SQL очереди, lease и блокировки проверяются на PostgreSQL, SQLite их не заменяет.
 

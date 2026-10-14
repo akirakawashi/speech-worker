@@ -25,7 +25,6 @@ class Settings(BaseSettings):
     db_pool_timeout_seconds: float = Field(default=10.0, gt=0)
     db_pool_recycle_seconds: int = Field(default=1800, ge=1)
     db_write_trace_enabled: bool = False
-    speech_display_timezone: str = "Europe/Moscow"
     speech_worker_temp_dir: Path = Path("/tmp/speech-worker")
 
     # Способ получения записей NCC.
@@ -36,24 +35,9 @@ class Settings(BaseSettings):
     speech_ncc_username: str = ""
     speech_ncc_api_token: str = ""
     speech_ncc_timeout_seconds: float = Field(default=60.0, ge=5.0, le=600.0)
-    speech_ncc_min_talk_seconds: int = Field(default=10, ge=0, le=3600)
-    speech_ncc_session_anchor: str = ""
-    speech_ncc_reporting_database_url: str = ""
-    speech_ncc_reporting_db_password: str = ""
-    speech_ncc_reporting_views: str = ""
-    speech_ncc_reporting_timezone: str = "Europe/Moscow"
 
-    # Источник продаж Телфина.
-    speech_telphin_base_url: str = "https://apiproxy.telphin.ru"
-    speech_telphin_app_id: str = ""
-    speech_telphin_app_secret: str = ""
+    # Скачивание записей Телфина по выданным бэкендом ссылкам.
     speech_telphin_timeout_seconds: float = Field(default=60.0, ge=5.0, le=600.0)
-    speech_telphin_min_talk_seconds: int = Field(default=10, ge=0, le=3600)
-    speech_telphin_excluded_extensions: str = "13240*000,13240*007,13240*444"
-    speech_telphin_excluded_groups: str = "22001"
-    speech_telphin_history_from: str = ""
-    speech_telphin_history_days_per_run: int = Field(default=7, ge=1, le=60)
-    speech_phone_hash_pepper: str = ""
 
     # Оригиналы записей в MinIO.
     speech_storage_base_url: str = ""
@@ -71,7 +55,7 @@ class Settings(BaseSettings):
     speech_whisper_timeout_seconds: float = Field(default=600.0, ge=30.0, le=1800.0)
     speech_whisper_vad_filter: bool = True
 
-    # Доставка ASR и готовые планы приёма бэкенда.
+    # Управление получением записи и доставка ASR бэкенду.
     speech_backend_base_url: str = ""
     speech_worker_api_token: str = Field(default="", repr=False)
     speech_backend_timeout_seconds: float = Field(default=30.0, ge=1.0, le=120.0)

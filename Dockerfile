@@ -33,7 +33,8 @@ RUN --mount=type=cache,target=/root/.cache/uv \
     uv sync --locked --no-dev --no-editable
 RUN uv pip check \
     && speech-worker --help \
-    && speech-ingest --help \
+    && speech-sync-directories --help \
+    && speech-prune --help \
     && ffmpeg -version > /dev/null \
     && ffprobe -version > /dev/null
 

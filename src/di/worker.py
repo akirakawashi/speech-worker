@@ -5,9 +5,8 @@ from __future__ import annotations
 import asyncio
 
 from src.application.dto.calls import JobKind
-from src.application.dto.maintenance import MaintenanceAction
 from src.application.dto.worker import WorkerOptions
-from src.di.maintenance import build_maintenance
+from src.di.ingest_control import build_ingest_control
 from src.di.pipeline import build_registry, build_stage_deps
 from src.di.sources import build_worker_source
 from src.di.transcription_delivery import build_transcription_delivery
@@ -21,7 +20,6 @@ from src.infrastructure.persistence.session import (
 from src.infrastructure.queue.postgres import PostgresJobQueue
 from src.infrastructure.queue.worker import Worker, _install_signal_handlers
 from src.infrastructure.runtime.logs import configure_logging
-from src.infrastructure.runtime.service import WorkerService
 from src.infrastructure.storage.recordings import build_storage
 from src.setting.config import Settings, get_settings
 
@@ -62,6 +60,7 @@ async def _run_worker(options: WorkerOptions, settings: Settings) -> None:
             queue,
             build_registry(
                 options.stages,
+                ingest_service=build_ingest_control(settings) if JobKind.INGEST in stages else None,
                 transcription_service=build_transcription_delivery(settings, sessionmaker)
                 if JobKind.TRANSCRIBE in stages
                 else None,
@@ -78,19 +77,8 @@ async def _run_worker(options: WorkerOptions, settings: Settings) -> None:
             _install_signal_handlers(worker)
             await worker.run_once()
         else:
-            actions: list[MaintenanceAction] = []
-            if not options.queue_only:
-                if JobKind.INGEST in stages:
-                    actions.extend(source.value for source in options.sources)
-            if actions:
-                service = WorkerService(
-                    worker, build_maintenance(settings, sessionmaker, queue), actions
-                )
-                _install_signal_handlers(service)
-                await service.run_forever()
-            else:
-                _install_signal_handlers(worker)
-                await worker.run_forever()
+            _install_signal_handlers(worker)
+            await worker.run_forever()
     finally:
         await engine.dispose()
 

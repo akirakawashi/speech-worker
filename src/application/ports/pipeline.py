@@ -4,17 +4,13 @@ from typing import Protocol, runtime_checkable
 from uuid import UUID
 
 from src.application.dto.pipeline import IngestWork
-from src.application.dto.pipeline_input import CallForIngest, CallForTranscription
+from src.application.dto.pipeline_input import CallForTranscription
 from src.application.ports.queue import ClaimedJob
 
 
 @runtime_checkable
 class StageRepository(Protocol):
     """Прочитать метаданные записи без открытой транзакции во время HTTP."""
-
-    async def load_ingest(self, call_id: UUID) -> CallForIngest | None:
-        """Вернуть данные записи и проекта; None означает удалённый звонок."""
-        ...
 
     async def load_transcription(self, call_id: UUID) -> CallForTranscription | None:
         """Вернуть сведения о сохранённом аудио для распознавания либо None."""

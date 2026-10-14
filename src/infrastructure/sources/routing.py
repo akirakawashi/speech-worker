@@ -1,10 +1,9 @@
 """Выбор скачивателя по источнику звонка."""
 
-from collections.abc import AsyncIterator, Mapping, Sequence
-from datetime import date
+from collections.abc import AsyncIterator, Mapping
 
 from src.application.dto.sources import CallRef
-from src.application.ports.sources import DailyBatchSource
+from src.infrastructure.sources.fetcher import AudioStreamSource
 
 
 class RoutingSource:
@@ -16,13 +15,9 @@ class RoutingSource:
 
     name = "routing"
 
-    def __init__(self, sources: Mapping[str, DailyBatchSource]) -> None:
+    def __init__(self, sources: Mapping[str, AudioStreamSource]) -> None:
         """Настроить RoutingSource из переданных параметров и зависимостей."""
         self._sources = dict(sources)
-
-    async def list_calls(self, day: date) -> Sequence[CallRef]:
-        """Перечислить метаданные звонков указанного дня без загрузки записей."""
-        raise NotImplementedError("calls are listed by daily_ingest per source, not by the worker")
 
     async def open_audio(self, ref: CallRef) -> AsyncIterator[bytes]:
         """Открыть поток записи звонка; отсутствие записи выражается ошибкой порта."""

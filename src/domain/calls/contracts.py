@@ -417,20 +417,12 @@ SPEECH_AUDIT_EVENT_TYPES: Final[frozenset[str]] = frozenset(
 #: потому что их меняет администратор из интерфейса, а не выкатка.
 SPEECH_DEFAULT_SETTINGS: Final[dict[str, object]] = {
     "retention_days": 180,
-    "short_call_threshold_s": 10,
     "stereo_operator_channel": 0,
     "stereo_role_method": RoleMethod.STEREO_ENERGY.value,
     # Сколько расшифровок идёт одновременно. Ограничение внешнее: сервер
     # Whisper один. Ночью языковая модель на той же карте простаивает, поэтому
     # запас есть; точное значение — после замера скорости (SP-003).
     "transcribe_concurrency": 2,
-    "backfill_window_days": 60,
-    # Суточный прогон запускается по расписанию снаружи (systemd timer или cron),
-    # а не сторожится приложением: задача, которая сама решает, когда ей пора,
-    # должна для этого работать всегда — то есть быть демоном, которым она не
-    # является. Значение хранится, чтобы интерфейс мог показать ожидаемое время
-    # и отличить «ещё не запускался» от «запускался и упал».
-    "daily_ingest_at": "00:05",
     "max_attempts": {
         JobKind.INGEST.value: 6,
         JobKind.TRANSCRIBE.value: 3,
